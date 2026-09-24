@@ -86,6 +86,11 @@ wanted). Call `finish({ grain, vignette, leak })` once in lib/shared.js. Then:
 (`seed: 1 + Math.floor(t * 12)` for boil), and still use colour fills, textures, light and depth. Rough lines alone are
 not a finished look.
 
+**anime / vector** — cel-shaded vector characters (`/engine/kits/vector.js` + `/engine/kits/chibi.js`, after motion.js).
+Characters are specs of ratios drawn by `chibi(c, SPEC, pose)`; eyes and mouths are morph targets, so expressions
+animate instead of snapping. Read `engine/VECTOR_GUIDE.md` (procedure, ranges, sweeps) and copy the sweep tests from
+`examples/vector-demo/lib/shared.js`. Backgrounds and finish still come from the motion kit.
+
 **3d** — three.js (`<script type="module">import * as THREE from 'three'`), renderer with `preserveDrawingBuffer: true`
 created in `VIDEO.setup`, render inside the shot, `VIDEO.useSource(renderer.domElement)`. Light it properly (key, rim,
 ambient), use materials with texture and fog, and add a 2D overlay (motion kit `finish`) for grain.

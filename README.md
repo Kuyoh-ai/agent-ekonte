@@ -73,10 +73,11 @@ examples/
   hello/    ランタイムの最小サンプル
   painted-demo/  水彩キットの見本（モデルシートのテスト描画つき）
   motion-demo/   モーションキットの見本
+  vector-demo/   ベクター/ちびキャラキットの見本（比率スペック、パラメータ掃引、表情モーフのアニメ）
 projects/   あなたのプロジェクト（git 管理外。各フォルダが個別の git を持つ）
 ```
 
-- **描き方とキット**: Step 1 で「おまかせ / 水彩・絵本 / モーショングラフィックス / 手描きスケッチ / 3D」を選べます。水彩は元の PDoom の描画基盤を移植した `engine/kits/painted.js`（p5.brush の水彩・インク・紙・粒子・ワイプ・文字）、平面系は `engine/kits/motion.js`（カメラ・奥行き・光・質感・パーティクル・仕上げ）を土台にします。見本は `examples/painted-demo/` と `examples/motion-demo/`。
+- **描き方とキット**: Step 1 で「おまかせ / 水彩・絵本 / モーショングラフィックス / 手描きスケッチ / アニメ・ベクター / 3D」を選べます。水彩は元の PDoom の描画基盤を移植した `engine/kits/painted.js`（p5.brush の水彩・インク・紙・粒子・ワイプ・文字）、平面系は `engine/kits/motion.js`（カメラ・奥行き・光・質感・パーティクル・仕上げ）を土台にします。見本は `examples/painted-demo/` と `examples/motion-demo/`。アニメ・ベクターは `engine/kits/vector.js`（曲線・入り抜き・モーフィング・セル塗り）と `engine/kits/chibi.js`（比率から生成するちびキャラのリグ）で、手順は `engine/VECTOR_GUIDE.md`、見本は `examples/vector-demo/`。
 - **本制作の進め方**: リーダーがまずキャラクターのリグとモデルシート（`VIDEO.test('cast')`）、完成度の見本フレーム（`VIDEO.test('style')`）を作って見た目を固め、それから章ごとのサブエージェントに渡します。最後に品質基準（`engine/AGENT_GUIDE.md`）で全ショットを見直します。
 - **画像素材**: Step 1 で画像を追加すると `@img1` `@img2` … の ID が付きます。ブリーフ・コメント・チャットのどこでも `@img1` と書けば、その画像を指して指示できます。シーンのコードでは `VIDEO.image('img1')` で使えます。
 - **エンジンの約束ごと**: 各ショットは `fn(t, lt, dur, info)` で画面全体を描く純関数です。フレームは順不同・並列に描かれます。描画は Canvas2D を基本に、p5.js / p5.brush / three.js / GSAP / Rough.js をプロジェクトごとに選べます（`/vendor/` から配信され、CDN 不要）。
