@@ -176,14 +176,17 @@
     const col = o.ink || INK, side = o.side || 1, open = o.open ?? 1, style = o.style || 'round';
     const lw = w * .07, lx = (o.look?.[0] || 0) * w * .12, ly = (o.look?.[1] || 0) * h * .12;
     c.save();
-    if (style === 'xx') { // > < style: two thick chevrons per eye
-      const k = w * .28; ink(c, [[-k, -h * .28], [k * .3, 0], [-k, h * .28]].map(p => [p[0] * side, p[1]]), lw * 2.6, col, 'none');
-      ink(c, [[-k * .05 * side, -h * .34], [k * 1.3 * side, -h * .2]], lw * 2.2, col, 'none');
+    if (style === 'xx') { // > < : two thick strokes meeting at the inner vertex, tapering outward (brush feel), ~40° apart
+      const vx = -w * .35 * side, k = w * .95;
+      ink(c, [[vx, 0], [vx + k * .9 * side, -h * .45]], lw * 5, col, 'out');
+      ink(c, [[vx, 0], [vx + k * .9 * side, h * .45]], lw * 5, col, 'out');
+      if (o.brow !== false) ink(c, [[vx + w * .05 * side, -h * .75], [vx + w * .7 * side, -h * .55]], lw * 3.2, col, 'out'); // angry brow toward the centre
       c.restore(); return;
     }
     if (style === 'closed' || style === 'happy' || open < .12) {
       const up = style === 'happy' ? -1 : (style === 'closed' ? .35 : .15);
-      ink(c, [[-w * .5, h * .05 * up], [0, h * .32 * up], [w * .5, h * .05 * up]], lw * 2.4, col, 'inout');
+      ink(c, [[-w * .5, h * .05 * up], [0, h * .32 * up], [w * .5, h * .05 * up]], lw * 3.4, col, 'inout');
+      if (style === 'happy') { ink(c, [[w * .42 * side, -h * .12], [w * .62 * side, -h * .3]], lw * 2.2, col, 'out'); ink(c, [[w * .3 * side, -h * .25], [w * .42 * side, -h * .48]], lw * 1.6, col, 'out'); }
       c.restore(); return;
     }
     // sclera: heavy upper lid curve, flatter lower lid; open squashes it toward the lower lid line.
@@ -218,6 +221,7 @@
     smile: [[-1, -.15], [-.6, -.05], [0, .05], [.6, -.05], [1, -.15], [.6, .12], [0, .22], [-.6, .12]],
     grin: [[-1, -.35], [-.5, -.15], [0, -.1], [.5, -.15], [1, -.35], [.55, .5], [0, .7], [-.55, .5]],
     o: [[-.45, -.55], [-.2, -.72], [.2, -.72], [.45, -.55], [.45, .55], [.2, .72], [-.2, .72], [-.45, .55]],
+    yell: [[-1, -.2], [-.6, -.7], [0, -.85], [.6, -.7], [1, -.2], [.6, .55], [0, .75], [-.6, .55]],
     shout: [[-1, -.45], [-.55, -.55], [0, -.6], [.55, -.55], [1, -.45], [.6, .95], [0, 1.15], [-.6, .95]],
     cat: [[-1, -.1], [-.5, .35], [0, -.05], [.5, .35], [1, -.1], [.5, .55], [0, .25], [-.5, .55]],
     flat: [[-.8, -.06], [-.4, -.06], [0, -.06], [.4, -.06], [.8, -.06], [.4, .06], [0, .06], [-.4, .06]],
@@ -233,7 +237,8 @@
       shape(c, p, { fill: o.fill || '#7d1f3a', tension: .9 });
       c.save(); tracePath(c, p, { tension: .9 }); c.clip();
       if (o.tongue !== false) { c.fillStyle = o.tongueColor || '#e8607a'; c.beginPath(); c.ellipse(0, hgt * .55, w * .6, hgt * .45, 0, 0, TAU); c.fill(); }
-      if (o.teeth) { c.fillStyle = '#fff'; c.beginPath(); const y0 = Math.min(...p.map(q => q.y)); c.rect(-w, y0 - 1, w * 2, hgt * .18); c.fill(); }
+      if (o.teeth === 'zig') { const y0 = Math.min(...p.map(q => q.y)); c.fillStyle = '#fff'; c.beginPath(); c.moveTo(-w * 1.2, y0 - 2); for (let i = 0; i <= 5; i++) { const x = -w + i * w * .4; c.lineTo(x, y0 - 2); c.lineTo(x + w * .2, y0 + hgt * .28); } c.lineTo(w * 1.2, y0 - 2); c.closePath(); c.fill(); }
+      else if (o.teeth) { c.fillStyle = '#fff'; c.beginPath(); const y0 = Math.min(...p.map(q => q.y)); c.rect(-w, y0 - 1, w * 2, hgt * .18); c.fill(); }
       c.restore();
       shape(c, p, { stroke: col, lw: w * .12, tension: .9 });
       if (o.fang) { const fx = w * .45 * (o.fang < 0 ? -1 : 1), y0 = Math.min(...p.map(q => q.y)); shape(c, [[fx - w * .12, y0 + w * .05], [fx + w * .12, y0 + w * .05], [fx, y0 + w * .38, 'c']], { fill: '#fff', stroke: col, lw: w * .06, tension: 0 }); }

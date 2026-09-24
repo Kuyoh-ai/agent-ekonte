@@ -1,257 +1,277 @@
 // chibi.js: a formula-driven chibi (SD) character rig on top of vector.js. Load after vector.js.
 //
 //   chibi(c, spec, pose)      draw one character. spec = ratios + colours (who), pose = expression / limbs / motion (now).
-//   PARTS.head / bangs / sideLocks / backHair / ear / eyeBox ...   the generators, usable on their own.
+//   PARTS.head / bangs / sideLocks / backHair / ear / torso / capsule ...   the generators, usable on their own.
 //
-// Nothing here is a hand-placed coordinate list: every part is generated from a few ratios that come from drawing
-// tutorials (see engine/docs/research-chibi-construction.md and engine/VECTOR_GUIDE.md). Units: pose.s = head width in
-// px; local origin = head centre; y down; the head box spans y -.5 .. +.5 (face fractions f map to y = f - .5).
+// No hand-placed coordinates: every part is generated from a few ratios (engine/VECTOR_GUIDE.md). Units: pose.s = head
+// width in px; local origin = head centre; y down; the head box spans y -.5 .. +.5 (face fraction f → y = f - .5).
+// The hair is ONE soft ellipse (skull × (1 + volume)) with tufts hanging off it; nothing has a straight edge.
 (() => {
   'use strict';
   const INKC = '#1c1a22';
   const R = (seed) => { const r = rng(seed * 7919 + 13); return () => r(); };
   const unit = (x, y) => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+  const shift = (pts, dx, dy) => pts.map(p => Array.isArray(p) ? [p[0] + dx, p[1] + dy, p[2]] : { ...p, x: p.x + dx, y: p.y + dy });
 
-  // ---------- head outline: "mochi" (round top, cheeks at `cheek`, narrower rounded chin) ----------
-  // w: width (1), h: height, cheek: y fraction (0 top .. 1 bottom) of the widest point, chin: 0 round .. 1 pointed,
-  // jaw: width ratio at 85% height. Returns 16 points, closed.
-  function head({ w = 1, h = 1, cheek = .6, chin = .25, jaw = .64 } = {}) {
-    const pts = [], n = 16;
+  // ---------- head outline: "mochi" (round top, cheeks at `cheek`, wide rounded chin) ----------
+  function head({ w = 1, h = 1, cheek = .6, chin = .2, jaw = .7 } = {}) {
+    const pts = [], n = 18;
     for (let i = 0; i < n; i++) {
-      const a = i / n * TAU - Math.PI / 2, cx = Math.cos(a), sy = Math.sin(a);
-      const f = (sy + 1) / 2;                                   // 0 top .. 1 bottom
+      const a = i / n * TAU - Math.PI / 2, cx = Math.cos(a), sy = Math.sin(a), f = (sy + 1) / 2;
       let xr = 1;
-      if (f > cheek) { const k = (f - cheek) / (1 - cheek); xr = 1 - (1 - jaw) * Math.pow(k, 1.7) - chin * .18 * k * k * k; }
-      else { const k = 1 - f / cheek; xr = 1 - .06 * k * k; }
-      pts.push({ x: cx * xr * w / 2, y: (sy * .5 + (f > cheek ? chin * .04 * (f - cheek) : 0)) * h });
+      if (f > cheek) { const k = (f - cheek) / (1 - cheek); xr = 1 - (1 - jaw) * Math.pow(k, 1.8) - chin * .15 * k * k * k; }
+      else { const k = 1 - f / cheek; xr = 1 - .05 * k * k; }
+      pts.push({ x: cx * xr * w / 2, y: (sy * .5 + (f > cheek ? chin * .03 * (f - cheek) : 0)) * h });
     }
     return pts;
   }
+  // The hair mass: an ellipse slightly wider than tall around the skull, centre a little above the head centre.
+  const hairMass = (vol) => ellipsePts(0, -.06, .5 + vol, .5 + vol * .8, 24);
 
-  // ---------- hair ----------
-  // A tuft spine: from a base point on the hairline, radially away from the whorl, with an S-curve.
-  // len in head units, curl -1..1 (bend of the tip, sideways), dir = unit direction, wob = extra sideways bow at mid.
+  // ---------- hair tufts ----------
   function tuftSpine(bx, by, dir, len, curl, wob = 0) {
     const nx = -dir[1], ny = dir[0];
     return [[bx, by], [bx + dir[0] * len * .5 + nx * wob * len, by + dir[1] * len * .5 + ny * wob * len], [bx + dir[0] * len + nx * curl * len * .5, by + dir[1] * len + ny * curl * len * .5]];
   }
-  // Hair-tuft width profile: wide for most of the length, then a rounded taper to a point (not a spike).
-  const hairProfile = (w, round = .45) => u => w * (u < 1 - round ? 1 - u * .12 : (1 - .12 * (1 - round)) * Math.pow(Math.cos((u - (1 - round)) / round * Math.PI / 2), .75));
+  // wide for most of the length, then a rounded taper to a soft point
+  const hairProfile = (w, round = .45) => u => w * (u < 1 - round ? 1 - u * .1 : (1 - .1 * (1 - round)) * Math.pow(Math.cos((u - (1 - round)) / round * Math.PI / 2), .8));
   const hairTuft = (spine, w, round) => taper(spine, hairProfile(w, round), { samples: 28 });
 
-  // Bangs: n tufts hanging from the hairline (y = hairline fraction of the head), radiating from the whorl.
-  //  { n, part (-1..1: where the parting sits), hairline, length (fraction of head height), lengthVar, widthVar, curl, seed, spread }
-  function bangs({ n = 5, part = -.3, hairline = .28, length = .3, lengthVar = .1, widthVar = .3, curl = .25, seed = 1, spread = 1.05, fan = .35 } = {}, sway = 0) {
+  // Bangs: n tufts of mixed widths sweeping toward `part`, roots inside the hair mass, tips at hairline + length.
+  function bangs({ n = 5, part = -.3, hairline = .3, length = .17, lengthVar = .12, widthVar = .35, curl = .25, seed = 1, spread = 1.0, fan = .3 } = {}, sway = 0) {
     const rnd = R(seed), out = [], y0 = hairline - .5;
+    const widths = Array.from({ length: n }, (_, i) => 1 + (rnd() - .5) * 2 * widthVar + (i % 2 ? .25 : -.25)); // alternate big / small
+    const tot = widths.reduce((a, b) => a + b, 0); let acc = 0;
     for (let i = 0; i < n; i++) {
-      const u = n === 1 ? .5 : i / (n - 1), bx = (u - .5) * spread, cur = Math.cos(Math.asin(clamp(bx / .58, -1, 1)));
-      const root = y0 - .16 - (1 - cur) * .12;                     // hidden inside the hair cap
-      const dir = unit((bx - part * .15) * fan, 1);                 // mostly down, fanning out from the parting
-      const L = (length + .16 + (1 - cur) * .12) * (1 + (rnd() - .5) * 2 * lengthVar);
-      const w = (spread / n) * 1.45 * (1 + (rnd() - .5) * 2 * widthVar);
-      const cdir = (i % 2 ? 1 : -1) * (bx < part * .15 ? -1 : 1);
-      const spine = tuftSpine(bx, root, dir, L, curl * cdir * .5 + sway * .4, (rnd() - .5) * .08 + sway * .2);
-      out.push({ spine, w, round: .5, order: Math.abs(u - .5) });   // centre tufts drawn last (on top)
+      const u = (acc + widths[i] / 2) / tot; acc += widths[i];
+      const bx = (u - .5) * spread, cur = Math.cos(Math.asin(clamp(bx / .6, -1, 1)));
+      const root = y0 - .2 - (1 - cur) * .1;
+      const dir = unit((bx - part * .2) * fan, 1);
+      const tipY = y0 + length * (1 + (rnd() - .5) * 2 * lengthVar) + (1 - cur) * .05;
+      const L = (tipY - root) / dir[1];
+      const w = (spread / tot) * widths[i] * 1.25;
+      const cdir = bx < part * .2 ? -1 : 1;                          // tips curl away from the parting (a sweep)
+      const spine = tuftSpine(bx, root, dir, L, curl * cdir * .6 + sway * .4, (rnd() - .5) * .06 + sway * .2);
+      out.push({ spine, w, round: .5, order: Math.abs(u - .5) });
     }
     return out.sort((a, b) => b.order - a.order);
   }
-  // Side locks: 1..n long tufts in front of the ear on each side, falling down with a gentle inward curve.
-  function sideLocks({ n = 2, length = .9, width = .24, curl = -.15, seed = 2 } = {}, sway = 0) {
+  // Side locks: hang from the 4 / 8 o'clock of the hair ellipse, taper to a tip that flicks outward.
+  function sideLocks({ n = 2, length = .9, width = .24, curl = .2, seed = 2 } = {}, sway = 0, vol = .1) {
     const rnd = R(seed), out = [];
     for (const sd of [-1, 1]) for (let i = 0; i < n; i++) {
-      const k = i / Math.max(1, n - 1), bx = sd * (.5 - k * .1), by = -.3 + k * .12, L = length * (1 - k * .25) * (1 + (rnd() - .5) * .2);
-      const spine = tuftSpine(bx, by, unit(sd * .12, 1), L, curl * sd + sway * .6 * (1 + k), sway * .3);
-      out.push({ spine, w: width * (1 - k * .35), round: .6 });
+      const k = i / Math.max(1, n - 1), a = Math.PI * (.22 + k * .1), bx = sd * Math.cos(a) * (.5 + vol) * .98, by = -.06 + Math.sin(a) * (.5 + vol * .8) * .9;
+      const L = length * (1 - k * .3) * (1 + (rnd() - .5) * .2);
+      const spine = tuftSpine(bx, by - .15, unit(sd * .05, 1), L + .15, curl * sd + sway * .6 * (1 + k), sway * .3 - sd * .05);
+      out.push({ spine, w: width * (1 - k * .3), round: .6 });
     }
     return out;
   }
-  // Back hair mass: 'bob' (ends at the chin), 'long' (to the waist), plus 'ponytail'/'twin' bundles.
+  // Back hair: 'bob' (mass to the chin), 'long' (to the waist, tapered ends); 'ponytail' / 'twin' bundles (one big S + one small).
   function backHair({ style = 'bob', length = .6, volume = .1, ends = 5, seed = 3, side = 1 } = {}, sway = 0) {
     const rnd = R(seed), out = [];
-    if (style === 'bob' || style === 'long') {
-      const L = style === 'bob' ? .35 + length * .3 : .8 + length * .6, hw = (style === 'bob' ? .5 : .42) + volume;
-      const pts = [[-hw, -.2], [-hw - .04, .1], [-hw * .92, .5 + L * .3], [-hw * .8, .5 + L * .5]];
-      for (let i = 0; i <= ends; i++) { const u = i / ends; pts.push([lerp(-hw * .9, hw * .9, u), .5 + L * .5 + (i % 2 ? .06 : -.02) * (1 + rnd()) + L * .5 * Math.sin(u * Math.PI) * .2]); }
-      pts.push([hw * .8, .5 + L * .5], [hw * .92, .5 + L * .3], [hw + .04, .1], [hw, -.2], [0, -.45]);
-      out.push({ pts: pts.map(([x, y]) => [x + sway * .25 * Math.max(0, y + .2), y]), round: 0 });
+    if (style === 'long') {
+      const L = .8 + length * .6, hw = .42 + volume;
+      const pts = [[-hw, -.1], [-hw - .02, .2], [-hw * .9, .5 + L * .3], [-hw * .75, .5 + L * .5]];
+      for (let i = 0; i <= ends; i++) { const u = i / ends; pts.push([lerp(-hw * .75, hw * .75, u), .5 + L * .5 + (i % 2 ? .07 : -.02) * (1 + rnd()) + Math.sin(u * Math.PI) * L * .1]); }
+      pts.push([hw * .75, .5 + L * .5], [hw * .9, .5 + L * .3], [hw + .02, .2], [hw, -.1], [0, -.35]);
+      out.push({ pts: pts.map(([x, y]) => [x + sway * .25 * Math.max(0, y + .2), y]) });
     }
     if (style === 'ponytail' || style === 'twin') {
-      const knots = style === 'twin' ? [[-.48, -.15], [.48, -.15]] : [[side * .42, -.32]];
-      for (const [kx, ky] of knots) for (let i = 0; i < 3; i++) {
-        const sd = Math.sign(kx) || 1, a = (.15 + i * .18) + (rnd() - .5) * .08, dir = unit(sd * Math.cos(a) * .5, Math.sin(a) + .8);
-        const L = (.55 + length * .5) * (1 - Math.abs(i - 1) * .1);
-        out.push({ spine: tuftSpine(kx, ky, dir, L, (i % 2 ? .35 : -.25) * sd + sway * .8, (rnd() - .5) * .15 + sway * .3), w: .34 - i * .04, round: .55, knot: [kx, ky] });
+      const knots = style === 'twin' ? [[-.5, -.15], [.5, -.15]] : [[side * .46, -.34]];
+      for (const [kx, ky] of knots) { const sd = Math.sign(kx) || 1;
+        out.push({ spine: [[kx, ky], [kx + sd * .28, ky + .1 + sway * .1], [kx + sd * .34 + sway * .15, ky + .45 + length * .3], [kx + sd * .2 + sway * .25, ky + .7 + length * .5]], w: .3, round: .55, knot: [kx, ky] });
+        out.push({ spine: [[kx, ky + .05], [kx + sd * .3, ky + .3], [kx + sd * .42 + sway * .1, ky + .4 + length * .25]], w: .17, round: .55 });
       }
     }
     return out;
   }
-  // Cat ear: base on the skull at angle `at` (radians from straight up, outward), size = height in head units.
-  // Outer edge bows outward, inner edge is straighter; returns { outer, inner } point lists (local head units).
-  function catEar({ size = .5, at = .55, tilt = .15, width = .36, bow = .1 } = {}, sd = 1) {
-    const cx = Math.sin(at) * .5 * sd, cy = -.5 + (1 - Math.cos(at)) * .45;       // base centre on the skull circle
+  // Cat ear at clock position `at` (rad from straight up, outward), tilted `tilt` further outward; base sunk into the hair.
+  function catEar({ size = .5, at = .78, tilt = .3, width = .3, bow = .1 } = {}, sd = 1, vol = .1) {
+    const rx = .5 + vol, ry = .5 + vol * .8;
+    const cx = Math.sin(at) * rx * sd, cy = -.06 - Math.cos(at) * ry;
     const dir = unit(Math.sin(at + tilt) * sd, -Math.cos(at + tilt)), nx = -dir[1] * sd, ny = dir[0] * sd; // (nx, ny) = outward
-    const P = (t, u) => [cx + dir[0] * size * t + nx * width * u, cy + dir[1] * size * t + ny * width * u];
-    const outer = [P(-.05, .5), P(.35, .5 + bow), P(.75, .28 + bow * .5), [...P(1.0, 0), 'c'], P(.7, -.28), P(.3, -.46), P(-.05, -.5)];
-    const inner = [P(.15, .24), P(.45, .26), [...P(.8, .0), 'c'], P(.45, -.2), P(.15, -.22)];
-    const fluff = [[.0, .1]].map(([t, u]) => taper([P(t + .12, u), P(t + .24, u * .9), P(t + .34, u * .8)], hairProfile(.04, .6), { samples: 12 }));
-    return { outer, inner, fluff, tip: P(1, 0), base: [cx, cy] };
+    const P = (t, u) => [cx + dir[0] * size * (t - .22) + nx * width * u, cy + dir[1] * size * (t - .22) + ny * width * u];
+    const outer = [P(0, .5), P(.4, .5 + bow), P(.78, .27), [...P(1.0, 0), 'c'], P(.72, -.27), P(.35, -.46), P(0, -.5)];
+    const inner = [P(.28, .22), P(.5, .24), [...P(.82, .0), 'c'], P(.5, -.19), P(.28, -.2)];
+    const fluff = [[.08, .1], [.1, -.12]].map(([t, u]) => taper([P(t + .1, u * 1.3), P(t + .22, u), P(t + .32, u * .7)], hairProfile(.05, .6), { samples: 12 }));
+    return { outer, inner, fluff, tip: P(1, 0), base: [cx, cy], dir };
   }
-  // ---------- body generators (local origin = chin, y down, head units) ----------
-  // Torso as a pear: shoulders width sw, hips width hw, height h.
-  const torso = (sw, hw, h, y0 = -.02) => [[-sw / 2, y0], [sw / 2, y0], [hw / 2 + .02, y0 + h * .55], [hw / 2, y0 + h, 'c'], [-hw / 2, y0 + h, 'c'], [-hw / 2 - .02, y0 + h * .55]];
-  // Capsule (pill) along a direction: used for sleeves, legs, tails.
+
+  // ---------- body generators (local origin = chin, y down) ----------
+  // Pear torso with big rounded corners: shoulders sw, hips hw, height h.
+  const torso = (sw, hw, h, y0 = -.02) => { const r = hw * .2; return [[-sw / 2 + r * .5, y0], [sw / 2 - r * .5, y0], [sw / 2 + .01, y0 + r], [hw / 2, y0 + h - r], [hw / 2 - r, y0 + h], [-hw / 2 + r, y0 + h], [-hw / 2, y0 + h - r], [-sw / 2 - .01, y0 + r]]; };
+  // Capsule along a direction with different end widths (sleeves, legs); ends are rounded.
   function capsule(x0, y0, x1, y1, w0, w1 = w0) {
-    const d = unit(x1 - x0, y1 - y0), n = [-d[1], d[0]], k = .55;
-    return [[x0 + n[0] * w0 / 2, y0 + n[1] * w0 / 2], [x1 + n[0] * w1 / 2, y1 + n[1] * w1 / 2], [x1 + n[0] * w1 * .35 + d[0] * w1 * .45, y1 + n[1] * w1 * .35 + d[1] * w1 * .45], [x1 - n[0] * w1 * .35 + d[0] * w1 * .45, y1 - n[1] * w1 * .35 + d[1] * w1 * .45], [x1 - n[0] * w1 / 2, y1 - n[1] * w1 / 2], [x0 - n[0] * w0 / 2, y0 - n[1] * w0 / 2], [x0 - n[0] * w0 * .35 - d[0] * w0 * k * .8, y0 - n[1] * w0 * .35 - d[1] * w0 * k * .8], [x0 + n[0] * w0 * .35 - d[0] * w0 * k * .8, y0 + n[1] * w0 * .35 - d[1] * w0 * k * .8]];
+    const d = unit(x1 - x0, y1 - y0), n = [-d[1], d[0]];
+    const E = (x, y, w, s) => [[x + n[0] * w / 2, y + n[1] * w / 2], [x + n[0] * w * .36 + d[0] * w * .42 * s, y + n[1] * w * .36 + d[1] * w * .42 * s], [x - n[0] * w * .36 + d[0] * w * .42 * s, y - n[1] * w * .36 + d[1] * w * .42 * s], [x - n[0] * w / 2, y - n[1] * w / 2]];
+    const a = E(x0, y0, w0, -1), b = E(x1, y1, w1, 1);
+    return [a[0], b[0], b[1], b[2], b[3], a[3], a[2], a[1]];
   }
+  // Fist: rounded square with three finger lines. Returns { pts, lines }.
+  const fist = (x, y, r) => ({ pts: roundRectPts(x - r, y - r * .9, r * 2, r * 1.8, r * .6), lines: [0, 1, 2].map(i => [[x - r * .55 + i * r * .55, y - r * .05], [x - r * .55 + i * r * .55, y + r * .55]]) });
 
   // ---------- the rig ----------
   function chibi(c, spec, pose) {
     const s = pose.s, sq = pose.squash || 0, sway = pose.hairSway || 0, tl = pose.tilt || 0, inkC = spec.ink || INKC;
-    const lw = s * (spec.lineWidth ?? .022), skin = spec.skin || '#fde5d3', skinDk = spec.skinShade || mixCol(skin, '#c8604a', .3);
+    const lw = s * (spec.lineWidth ?? .024), lwi = lw * .45, skin = spec.skin || '#fde5d3', skinDk = spec.skinShade || mixCol(skin, '#d0704f', .32);
     const H = pts => pts.map(p => Array.isArray(p) ? [p[0] * s, p[1] * s, p[2]] : { ...p, x: p.x * s, y: p.y * s });
-    const hair = spec.hair || {}, hc = hair.color || '#6fd3e6', hd = hair.dark || mixCol(hc, '#1a2a6a', .45), hl = hair.light || mixCol(hc, '#ffffff', .55);
-    const hairShade = (pts) => [{ pts: H(pts), color: hd, alpha: .45 }];
-    const hd2 = spec.head || {}, body = spec.body || {}, top = body.top || {}, bottom = body.bottom || {};
-    const heads = body.heads ?? 2.0, bodyH = heads - 1;              // body height in head units
-    const jump = pose.jump || 0;
-    const drawTufts = (list, fill, shade) => group(c, list.map(t => ({ pts: t.pts ? H(t.pts) : H(hairTuft(t.spine, t.w, t.round)), fill, tension: t.pts ? .8 : 1, shade })), { lw, outline: inkC });
+    const hair = spec.hair || {}, hc = hair.color || '#6fd3e6', hd = hair.dark || mixCol(hc, '#2a3a8a', .4), hl = hair.light || mixCol(hc, '#ffffff', .6);
+    const vol = hair.volume ?? .1, hd2 = spec.head || {}, body = spec.body || {}, top = body.top || {}, bottom = body.bottom || {};
+    const heads = body.heads ?? 1.9, bodyH = heads - 1, jump = pose.jump || 0;
+    // crescent shade: the same shape shifted toward the light's opposite side (down-right), clipped by group()
+    const crescent = (pts, col, k = 1, dx = .05, dy = .05) => [{ pts: H(shift(pts, dx * k, dy * k)), color: col, alpha: .38 }];
+    const tuftShape = (t, fill, dark) => { const pts = t.pts || hairTuft(t.spine, t.w, t.round); return { pts: H(pts), fill, tension: t.pts ? .85 : 1, shade: crescent(pts, dark, 1, .045, .03) }; };
 
     c.save(); c.translate(pose.x, pose.y + (pose.bob || 0) * s); c.scale(1 + sq * .35, 1 - sq * .35);
     // ground shadow
-    c.save(); c.globalAlpha = .16 * (1 - jump * .6); c.fillStyle = inkC; c.beginPath(); c.ellipse(0, (.5 + bodyH + .03 + jump * .2) * s, .38 * s * (1 - jump * .3), .05 * s, 0, 0, TAU); c.fill(); c.restore();
+    if (jump < .9) { c.save(); c.globalAlpha = .15 * (1 - jump); c.fillStyle = inkC; c.beginPath(); c.ellipse(0, (.5 + bodyH + .04) * s, .36 * s, .05 * s, 0, 0, TAU); c.fill(); c.restore(); }
 
-    // tail
+    // tail: brush shape (thin root, fat middle, fluffy pale tip)
     if (spec.tail) {
       const wag = pose.tailWag || 0, sd = spec.tail.side || 1, tc = spec.tail.color || hc;
-      const spine = [[sd * .18, .45 + bodyH * .35], [sd * (.42 + wag * .05), .55 + bodyH * .4 + wag * .05], [sd * (.6 + wag * .1), .35 + bodyH * .3 + wag * .12], [sd * (.68 + wag * .12), .1 + bodyH * .2 + wag * .2]];
-      group(c, [{ pts: H(tailPts(spine, .17)), fill: tc, shade: hairShade([[sd * .1, .6], [sd * .8, 1.4], [sd * 1, .2], [sd * .5, .3]]) }], { lw, outline: inkC });
+      const spine = [[sd * .14, .3 + bodyH * .55], [sd * (.38 + wag * .04), .32 + bodyH * .6 + wag * .04], [sd * (.6 + wag * .1), .2 + bodyH * .45 + wag * .1], [sd * (.7 + wag * .14), -.02 + bodyH * .3 + wag * .18]];
+      const poly = taper(spine, u => .06 + .16 * Math.sin(Math.PI * Math.pow(u, .8)) * (1 - u * .2) + .02 * (1 - u), { samples: 40 });
+      group(c, [{ pts: H(poly), fill: tc, shade: crescent(poly, hd, 1, .04, .04) }], { lw, outline: inkC });
+      const tipPoly = taper(spine.slice(2), u => .17 * (1 - u * .6) * Math.sin(.3 + u * 2.4), { samples: 16 });
+      shape(c, H(tipPoly), { fill: spec.tail.inner || mixCol(tc, '#ffffff', .7), stroke: inkC, lw });
     }
-    // back hair (mass, ponytail / twin tails)
-    const backSpec = hair.back || { style: 'bob' };
-    const backList = backHair(backSpec, sway);
-    drawTufts(backList, hc, hairShade([[-1.5, .0], [1.5, .0], [1.5, 2.5], [-1.5, 2.5]]));
-    for (const b of backList) if (b.knot && hair.ribbon) shape(c, H(ellipsePts(b.knot[0], b.knot[1], .07, .05, 8)), { fill: hair.ribbon, stroke: inkC, lw: lw * .6 });
-    if (top.kind === 'hoodie') group(c, [{ pts: H([[-.34, .35], [-.36, .55], [-.2, .65], [.2, .65], [.36, .55], [.34, .35], [0, .25]]), fill: top.color || '#1d1d24', shade: [{ pts: H([[-1, .5], [1, .5], [1, 1], [-1, 1]]), color: '#000', alpha: .35 }] }], { lw, outline: inkC });
-    // side locks (behind the body but in front of the back hair)
-    drawTufts(sideLocks(hair.side || {}, sway), hc, hairShade([[-1.5, .35], [1.5, .35], [1.5, 2.5], [-1.5, 2.5]]));
+    // hair: the mass ellipse + back styles + side locks (all behind the face)
+    const mass = hairMass(vol), backSpec = hair.back || { style: 'bob' }, backList = backHair(backSpec, sway);
+    const backShapes = [{ pts: H(mass), fill: hc, tension: 1, shade: [{ pts: H([[-1.5, .1], [1.5, .1], [1.5, 2], [-1.5, 2]]), color: hd, alpha: .35 }] }].concat(backList.map(t => tuftShape(t, hc, hd)));
+    if (top.kind === 'hoodie') group(c, [{ pts: H([[-.36, .3], [-.38, .52], [-.2, .62], [.2, .62], [.38, .52], [.36, .3], [0, .22]]), fill: top.color || '#1d1d24', shade: [{ pts: H([[-1, .45], [1, .45], [1, 1], [-1, 1]]), color: '#000', alpha: .35 }] }], { lw, outline: inkC });
+    group(c, backShapes.concat(sideLocks(hair.side || {}, sway, vol).map(t => tuftShape(t, hc, hd))), { lw, outline: inkC });
+    for (const b of backList) if (b.knot && hair.ribbon) shape(c, H(ellipsePts(b.knot[0], b.knot[1], .07, .05, 8)), { fill: hair.ribbon, stroke: inkC, lw: lwi });
 
     // ---- body (origin at the chin)
     c.save(); c.translate(0, .46 * s);
-    const tw = body.torsoWidth ?? .58, torsoH = bodyH * .55, legH = bodyH * .45, legW = body.legWidth ?? .17, legGap = body.legGap ?? .16;
+    const tw = body.torsoWidth ?? .6, torsoH = bodyH * .55, legH = bodyH * .45, legW = body.legWidth ?? .17, legGap = body.legGap ?? .15;
     const tc = top.color || '#2b2f4a', tLt = top.light || mixCol(tc, '#ffffff', .25), tDk = top.dark || mixCol(tc, '#000000', .45);
-    const legBend = sd => (sd < 0 ? pose.legL : pose.legR) ?? jump * .5;
-    for (const sd of [-1, 1]) {                                     // legs + shoes
-      const bend = legBend(sd), lx = sd * legGap, y0 = torsoH - .06, y1 = torsoH + legH - .06 * bend;
-      c.save(); c.translate(lx * s, y0 * s); c.rotate(sd * bend * .5); c.translate(-lx * s, -y0 * s);
+    // legs: thigh + shin capsules; bend = knee lift (0 straight .. 1 knee up), kick = swing back
+    for (const sd of [-1, 1]) {
+      const bend = (sd < 0 ? pose.legL : pose.legR) ?? (jump ? (sd < 0 ? .8 : .25) * jump : 0);
+      const lx = sd * legGap, hip = torsoH - .08, thighL = legH * .5, shinL = legH * .5;
+      const a1 = sd * bend * 1.1, kx = lx + Math.sin(a1) * thighL, ky = hip + Math.cos(a1) * thighL;   // knee
+      const a2 = a1 - sd * bend * 1.6, fx = kx + Math.sin(a2) * shinL, fy = ky + Math.cos(a2) * shinL;  // ankle
       const legCol = bottom.kind === 'jeans' ? (bottom.color || '#7fa6c9') : (bottom.socks || skin), legDk = mixCol(legCol, '#1a1a30', .35);
-      group(c, [{ pts: H(capsule(lx, y0, lx, y1, legW, legW * .92)), fill: legCol, shade: [{ pts: H([[lx + .02, y0 - .2], [lx + .3, y0 - .2], [lx + .3, y1 + .2], [lx + .04, y1 + .2]]), color: legDk, alpha: .45 }] }], { lw, outline: inkC });
-      if (bottom.kind === 'jeans' && bottom.ripped) { shape(c, H(ellipsePts(lx, y0 + (y1 - y0) * .55, legW * .4, .035, 10)), { fill: skin, stroke: inkC, lw: lw * .5 }); for (let i = -1; i <= 1; i++) ink(c, H([[lx - legW * .35, y0 + (y1 - y0) * .55 + i * .02], [lx + legW * .35, y0 + (y1 - y0) * .55 + i * .02]]), lw * .35, '#eef2ff', 'inout'); }
-      if (bottom.kind !== 'jeans' && bottom.socks) ink(c, H([[lx - legW * .4, y0 + .05], [lx + legW * .4, y0 + .05]]), lw * .4, mixCol(legCol, '#ffffff', .3), 'inout');
-      const sh = bottom.shoes || '#e9e9ef', shoe = [[lx - legW * .7, y1 - .02], [lx + legW * .7, y1 - .02], [lx + legW * .8, y1 + .08, 'c'], [lx - legW * .8, y1 + .08, 'c']];
-      const shapes = [{ pts: H(shoe), fill: sh, shade: [{ pts: H([[-1, y1 + .04], [1, y1 + .04], [1, 2], [-1, 2]]), color: mixCol(sh, '#000000', .35), alpha: .5 }] }];
-      if (bottom.sole) shapes.push({ pts: H([[lx - legW * .85, y1 + .04], [lx + legW * .85, y1 + .04], [lx + legW * .85, y1 + .1, 'c'], [lx - legW * .85, y1 + .1, 'c']]), fill: bottom.sole });
-      group(c, shapes, { lw, outline: inkC });
-      c.restore();
+      const thigh = capsule(lx, hip, kx, ky, legW * 1.05, legW * .95), shin = capsule(kx, ky, fx, fy, legW * .95, legW * .85);
+      group(c, [{ pts: H(thigh), fill: legCol, shade: crescent(thigh, legDk, 1, .04, 0) }, { pts: H(shin), fill: legCol, shade: crescent(shin, legDk, 1, .04, 0) }], { lw, outline: inkC });
+      if (bottom.kind === 'jeans' && bottom.ripped) { const rp = [[kx - legW * .38, ky - .01], [kx - legW * .1, ky - .035], [kx + legW * .15, ky - .015], [kx + legW * .4, ky - .03], [kx + legW * .32, ky + .035], [kx, ky + .02], [kx - legW * .3, ky + .04]]; shape(c, H(rp), { fill: skin, stroke: inkC, lw: lwi, tension: .5 }); for (let i = 0; i < 2; i++) ink(c, H([[kx - legW * .3, ky - .02 + i * .03], [kx + legW * .3, ky - .02 + i * .03]]), lwi * .6, '#eef2ff', 'inout'); }
+      if (bottom.kind !== 'jeans' && bottom.socks) ink(c, H([[lx - legW * .45, hip + .04], [lx + legW * .45, hip + .04]]), lwi, mixCol(legCol, '#ffffff', .35), 'inout');
+      // shoe: a rounded blob at the ankle, pointing along the shin
+      const sh = bottom.shoes || '#e9e9ef', d = unit(fx - kx, fy - ky), n = [-d[1], d[0]];
+      const shoe = capsule(fx - d[0] * .01, fy - d[1] * .01, fx + d[0] * .06, fy + d[1] * .06, legW * 1.1, legW * 1.2);
+      const shoeShapes = [{ pts: H(shoe), fill: sh, shade: crescent(shoe, mixCol(sh, '#000000', .35), 1, .0, .05) }];
+      if (bottom.sole) shoeShapes.push({ pts: H(capsule(fx + d[0] * .05, fy + d[1] * .05, fx + d[0] * .085, fy + d[1] * .085, legW * 1.25, legW * 1.25)), fill: bottom.sole });
+      group(c, shoeShapes, { lw, outline: inkC });
     }
-    if (bottom.kind === 'skirt') {                                   // pleated skirt under the top
-      const kc = bottom.color || '#2e3b52', y0 = torsoH * .7, y1 = torsoH + .04, hw = tw * .62;
-      const sk = [[-hw * .85, y0], [hw * .85, y0], [hw, y1, 'c']]; for (let i = 1; i <= 4; i++) sk.push([lerp(hw, -hw, i / 5), y1 + (i % 2 ? .04 : 0)]); sk.push([-hw, y1, 'c']);
-      group(c, [{ pts: H(sk), fill: kc, shade: [-.7, -.2, .3].map(px => ({ pts: H([[px * hw, y0 - .1], [px * hw + .1, y0 - .1], [px * hw + .13, y1 + .2], [px * hw - .02, y1 + .2]]), color: '#101522', alpha: .4 })) }], { lw, outline: inkC });
-    } else if (bottom.kind === 'jeans') group(c, [{ pts: H([[-tw * .55, torsoH - .12], [tw * .55, torsoH - .12], [tw * .56, torsoH], [-tw * .56, torsoH]]), fill: bottom.color || '#7fa6c9', shade: [{ pts: H([[0, -1], [1, -1], [1, 2], [0, 2]]), color: '#1c2a44', alpha: .35 }] }], { lw, outline: inkC });
-    // torso
-    if (top.kind === 'jacket') {                                     // inner sweater under an open jacket
-      const swc = top.inner || '#8a8f9c', swd = mixCol(swc, '#000000', .3);
-      group(c, [{ pts: H(torso(tw * .7, tw * .8, torsoH * .85)), fill: swc, shade: [{ pts: H([[.04, -.2], [.5, -.2], [.5, 1], [.1, 1]]), color: swd, alpha: .55 }] }], { lw, outline: inkC });
-      for (let i = -3; i <= 3; i++) ink(c, H([[i * .05, .02], [i * .056, torsoH * .75]]), lw * .35, 'rgba(20,20,30,.35)', 'inout');
+    if (bottom.kind === 'skirt') {
+      const kc = bottom.color || '#2e3b52', y0 = torsoH * .66, y1 = torsoH + .06, hw = tw * .64;
+      const sk = [[-hw * .8, y0], [hw * .8, y0], [hw, y1 - .02], [hw * .9, y1 + .02, 'c']]; for (let i = 1; i <= 5; i++) sk.push([lerp(hw * .9, -hw * .9, i / 6), y1 + (i % 2 ? .045 : .0), 'c']); sk.push([-hw * .9, y1 + .02, 'c'], [-hw, y1 - .02]);
+      group(c, [{ pts: H(sk), fill: kc, tension: .4, shade: [-.65, -.15, .35].map(px => ({ pts: H([[px * hw, y0 - .1], [px * hw + .09, y0 - .1], [px * hw + .12, y1 + .2], [px * hw - .02, y1 + .2]]), color: '#101522', alpha: .4 })) }], { lw, outline: inkC });
+    }
+    // torso (+ hem rib) and inner sweater for a jacket
+    if (top.kind === 'jacket') {
+      const swc = top.inner || '#8a8f9c', swd = mixCol(swc, '#000000', .3), tp = torso(tw * .72, tw * .82, torsoH * .88);
+      group(c, [{ pts: H(tp), fill: swc, shade: crescent(tp, swd, 1, .06, 0) }], { lw, outline: inkC });
+      for (let i = -3; i <= 3; i++) ink(c, H([[i * .05, .04], [i * .056, torsoH * .78]]), lwi * .7, 'rgba(20,20,30,.3)', 'inout');
     } else {
-      group(c, [{ pts: H(torso(tw, tw * 1.1, torsoH)), fill: tc, shade: [{ pts: H([[.12, -.2], [.6, -.2], [.6, 1], [.16, 1]]), color: tDk, alpha: .45 }], light: [{ pts: H([[-tw * .5, -.1], [-tw * .34, -.1], [-tw * .34, 1], [-tw * .5, 1]]), color: tLt, alpha: .3 }] }], { lw, outline: inkC });
-      if (top.kind === 'hoodie') { ink(c, H([[0, -.02], [0, torsoH]]), lw * .7, top.zip || '#c9cbd6', 'none'); for (const sd of [-1, 1]) ink(c, H([[sd * .08, -.04], [sd * .1, torsoH * .35], [sd * .06, torsoH * .6]]), lw * .45, top.string || '#e8e8ee', 'none'); ink(c, H([[-.22, torsoH * .55], [-.24, torsoH]]), lw * .5, tLt, 'inout'); ink(c, H([[.22, torsoH * .55], [.24, torsoH]]), lw * .5, tLt, 'inout'); }
+      const tp = torso(tw, tw * 1.12, torsoH), rib = [[-tw * .5, torsoH - .05], [tw * .5, torsoH - .05], [tw * .48, torsoH + .03], [-tw * .48, torsoH + .03]];
+      group(c, [{ pts: H(tp), fill: tc, shade: crescent(tp, tDk, 1, .07, .02) }, { pts: H(rib), fill: tLt, tension: .3 }], { lw, outline: inkC });
+      for (let i = -3; i <= 3; i++) ink(c, H([[i * .06, torsoH - .04], [i * .06, torsoH + .02]]), lwi * .6, 'rgba(0,0,0,.25)', 'none');
+      if (top.kind === 'hoodie') { ink(c, H([[0, .0], [0, torsoH - .05]]), lwi * 1.2, top.zip || '#c9cbd6', 'none'); for (const sd of [-1, 1]) ink(c, H([[sd * .08, -.02], [sd * .1, torsoH * .35], [sd * .06, torsoH * .6]]), lwi, top.string || '#e8e8ee', 'none'); ink(c, H([[-.24, torsoH * .5], [-.25, torsoH - .06]]), lwi, tLt, 'inout'); ink(c, H([[.24, torsoH * .5], [.25, torsoH - .06]]), lwi, tLt, 'inout'); }
     }
-    // sleeves (pill capsules from the shoulder; a = angle, 0 hanging .. π/2 out .. >1.1 raised: drawn after the head)
-    const raised = [], sleeveL = top.sleeve ?? torsoH * 1.05, sw0 = top.sleeveWidth ?? .24;
+    // sleeves: shoulder → elbow → cuff. a = raise (0 hanging .. ~2.4 fist beside the head). Cuff 1.3× wider (萌え袖), fist half out.
+    const raised = [], sleeveL = top.sleeve ?? torsoH * 1.0, sw0 = top.sleeveWidth ?? .24;
     const sleeve = (sd, a) => {
-      c.save(); c.translate(sd * tw * .48 * s, .0); c.rotate(-sd * (.12 + a));
-      const L = a > 1.1 ? sleeveL * .8 : sleeveL;
-      group(c, [{ pts: H(capsule(0, -.02, sd * .02, L, sw0, sw0 * .95)), fill: tc, shade: [{ pts: H([[sd * .04, -.3], [sd * .5, -.3], [sd * .5, 2], [sd * .08, 2]]), color: tDk, alpha: .45 }], light: [{ pts: H([[sd * -.13, -.1], [sd * -.06, -.1], [sd * -.04, L], [sd * -.11, L]]), color: tLt, alpha: .35 }] }], { lw, outline: inkC });
-      for (let i = 0; i < 3; i++) ink(c, H([[sd * -.09, L - .1 + i * .025], [sd * .1, L - .11 + i * .025]]), lw * .3, 'rgba(255,255,255,.18)', 'inout');
-      if (sd === 1 && top.badge) shape(c, H(roundRectPts(.02, L * .25, .09, .08, .015)), { fill: '#e8e8ec', stroke: inkC, lw: lw * .45 });
-      if (a > .4 || pose.fists) { c.translate(sd * .01 * s, (L + .02) * s); group(c, [{ pts: H(circlePts(0, 0, .085, 10)), fill: skin, shade: [{ pts: H([[-.1, .02], [.1, .02], [.1, .2], [-.1, .2]]), color: skinDk, alpha: .5 }] }], { lw: lw * .8, outline: inkC }); ink(c, H([[-.06, -.02], [.06, -.02]]), lw * .3, '#c98f78', 'inout'); }
+      c.save(); c.translate(sd * tw * .5 * s, .02 * s);
+      const up = clamp((a - .6) / 1.6);                                   // 0 hanging .. 1 raised (elbow bent 90°)
+      const upperA = -sd * (.15 + a * .55), upperL = sleeveL * .55;
+      const ex = Math.sin(upperA) * upperL, ey = Math.cos(upperA) * upperL;        // elbow
+      const foreA = upperA - sd * up * 1.5, foreL = sleeveL * .5;
+      const hx = ex + Math.sin(foreA) * foreL, hy = ey + Math.cos(foreA) * foreL;   // cuff
+      const upper = capsule(0, 0, ex, ey, sw0, sw0 * 1.05), fore = capsule(ex, ey, hx, hy, sw0 * 1.05, sw0 * 1.3);
+      group(c, [{ pts: H(upper), fill: tc, shade: crescent(upper, tDk, 1, .05, .02) }, { pts: H(fore), fill: tc, shade: crescent(fore, tDk, 1, .05, .02) }], { lw, outline: inkC });
+      const d = unit(hx - ex, hy - ey), n = [-d[1], d[0]];
+      for (let i = -1; i <= 1; i++) ink(c, H([[hx + n[0] * sw0 * .5 * .8 - d[0] * (.05 + i * .02), hy + n[1] * sw0 * .5 * .8 - d[1] * (.05 + i * .02)], [hx - n[0] * sw0 * .5 * .8 - d[0] * (.05 + i * .02), hy - n[1] * sw0 * .5 * .8 - d[1] * (.05 + i * .02)]]), lwi * .6, 'rgba(255,255,255,.2)', 'inout');
+      if (sd === 1 && top.badge) shape(c, H(roundRectPts(ex * .5 + .02, ey * .5 - .02, .09, .08, .015)), { fill: '#e8e8ec', stroke: inkC, lw: lwi });
+      if (up > .2 || pose.fists) { const f = fist(hx + d[0] * .05, hy + d[1] * .05, .075); c.save(); tracePath(c, H(fore)); c.clip(); c.restore();
+        group(c, [{ pts: H(f.pts), fill: skin, shade: crescent(f.pts, skinDk, 1, .03, .03) }], { lw: lw * .8, outline: inkC }); for (const l of f.lines) ink(c, H(l), lwi * .7, mixCol(skin, '#a05a40', .5), 'inout');
+        group(c, [{ pts: H(capsule(hx - d[0] * .04, hy - d[1] * .04, hx + d[0] * .03, hy + d[1] * .03, sw0 * 1.3, sw0 * 1.28)), fill: tc }], { lw, outline: inkC }); }
       c.restore();
     };
-    for (const [sd, a] of [[-1, pose.armL || 0], [1, pose.armR || 0]]) { if (a > 1.1) raised.push([sd, a]); else sleeve(sd, a); }
-    if (top.kind === 'jacket') for (const sd of [-1, 1]) {           // open jacket fronts over the sweater
-      const front = [[sd * .06, -.08], [sd * tw * .5, -.08], [sd * tw * .62, torsoH * .3], [sd * tw * .6, torsoH * .95, 'c'], [sd * .14, torsoH], [sd * .1, torsoH * .3]];
-      group(c, [{ pts: H(front), fill: tc, shade: [{ pts: H([[sd * .2, -.2], [sd * .6, -.2], [sd * .6, 1], [sd * .28, 1]]), color: tDk, alpha: .45 }], light: [{ pts: H([[sd * .06, -.1], [sd * .12, -.1], [sd * .15, 1], [sd * .1, 1]]), color: tLt, alpha: .55 }] }], { lw, outline: inkC });
+    for (const [sd, a] of [[-1, pose.armL || 0], [1, pose.armR || 0]]) { if (a > 1.2) raised.push([sd, a]); else sleeve(sd, a); }
+    if (top.kind === 'jacket') for (const sd of [-1, 1]) {
+      const front = [[sd * .06, -.06], [sd * tw * .5, -.06], [sd * tw * .64, torsoH * .3], [sd * tw * .62, torsoH * .92, 'c'], [sd * tw * .5, torsoH + .02], [sd * .16, torsoH], [sd * .1, torsoH * .3]];
+      group(c, [{ pts: H(front), fill: tc, shade: crescent(front, tDk, 1, .06, .02), light: [{ pts: H([[sd * .06, -.1], [sd * .12, -.1], [sd * .16, 1], [sd * .1, 1]]), color: tLt, alpha: .5 }] }], { lw, outline: inkC });
     }
-    // collar
+    // collar: chunky rolled turtleneck (jacket), hood rim (hoodie) or a simple neckline
     if (top.kind === 'jacket') {
-      const swd = mixCol(top.inner || '#8a8f9c', '#000000', .3);
-      group(c, [{ pts: H([[-.3, -.16], [-.12, -.22], [.12, -.22], [.3, -.16], [.32, .06], [0, .12], [-.32, .06]]), fill: swd, shade: [{ pts: H([[-.4, -.08], [.4, -.08], [.4, .3], [-.4, .3]]), color: '#3a3d48', alpha: .5 }] }], { lw, outline: inkC });
-      for (let i = -4; i <= 4; i++) ink(c, H([[i * .065, -.19], [i * .068, .07]]), lw * .4, 'rgba(20,20,30,.4)', 'inout');
-    } else if (top.kind === 'hoodie') group(c, [{ pts: H([[-.3, -.1], [0, .0], [.3, -.1], [.3, .02], [0, .12], [-.3, .02]]), fill: tLt, shade: [{ pts: H([[-.5, -.04], [.5, -.04], [.5, .3], [-.5, .3]]), color: tDk, alpha: .4 }] }], { lw, outline: inkC });
-    else group(c, [{ pts: H([[-.2, -.1], [.2, -.1], [.22, .04], [0, .1], [-.22, .04]]), fill: tLt }], { lw, outline: inkC });
+      const swd = mixCol(top.inner || '#8a8f9c', '#000000', .3), col = [[-.34, -.14], [-.2, -.24], [0, -.27], [.2, -.24], [.34, -.14], [.36, .06], [.2, .13], [0, .15], [-.2, .13], [-.36, .06]];
+      group(c, [{ pts: H(col), fill: swd, shade: crescent(col, '#2e3038', 1, .0, .07) }], { lw, outline: inkC });
+      for (let i = -4; i <= 4; i++) ink(c, H([[i * .07, -.2 + Math.abs(i) * .012], [i * .074, .1 - Math.abs(i) * .01]]), lwi * .8, 'rgba(20,20,30,.35)', 'inout');
+    } else if (top.kind === 'hoodie') group(c, [{ pts: H([[-.32, -.1], [0, .02], [.32, -.1], [.32, .04], [0, .14], [-.32, .04]]), fill: tLt, shade: [{ pts: H([[-.5, -.02], [.5, -.02], [.5, .3], [-.5, .3]]), color: tDk, alpha: .4 }] }], { lw, outline: inkC });
+    else group(c, [{ pts: H([[-.2, -.08], [.2, -.08], [.22, .05], [0, .12], [-.22, .05]]), fill: tLt }], { lw, outline: inkC });
     c.restore(); // body
 
     // ---- head (pivot at the neck)
     c.save(); c.translate(0, .46 * s); c.rotate(tl); c.translate(0, -.46 * s);
-    const face = H(head(hd2));
-    group(c, [{ pts: H([[-.09, .3], [.09, .3], [.11, .52], [-.11, .52]]), fill: skin, shade: [{ pts: H([[-.2, .3], [.2, .3], [.2, .5], [-.2, .5]]), color: skinDk, alpha: .5 }] },
-      { pts: face, fill: skin, shade: [{ pts: H([[-.6, -.6], [.6, -.6], [.6, -.02], [.3, .03], [0, -.02], [-.3, .03], [-.6, -.02]]), color: mixCol(skin, '#d08a70', .35), alpha: .55 }] }], { lw: lw * 1.1, outline: inkC });
-    // face
-    const ey = spec.eyes || {}, eyeY = ((ey.y ?? .64) - .5) * s, eyeX = (ey.spacing ?? .22) * s, ew = (ey.size ?? .2) * s, eh = ew * (ey.aspect ?? .95);
-    const bl = pose.blush ?? 0; if (bl > 0) for (const sd of [-1, 1]) blush(c, sd * .3 * s, eyeY + eh * .55, .085 * s, spec.blushColor || '#f39a8f', .45 * bl, spec.blushLines !== false);
+    const facePts = head(hd2), face = H(facePts);
+    const bangList = bangs(hair.bangs || {}, sway), bangPolys = bangList.map(t => hairTuft(t.spine, t.w, t.round));
+    group(c, [{ pts: H([[-.1, .3], [.1, .3], [.12, .52], [-.12, .52]]), fill: skin, shade: [{ pts: H([[-.2, .3], [.2, .3], [.2, .5], [-.2, .5]]), color: skinDk, alpha: .5 }] },
+      { pts: face, fill: skin, shade: bangPolys.map(p => ({ pts: H(shift(p, .0, .055)), color: skinDk, alpha: .35 })) }], { lw: lw * 1.1, outline: inkC });
+    // face: eyes are the stars — width = eyes.size of the head (default .27), centre at eyes.y of the head box
+    const ey = spec.eyes || {}, eyeY = ((ey.y ?? .64) - .5) * s, eyeX = (ey.spacing ?? .23) * s, ew = (ey.size ?? .27) * s, eh = ew * (ey.aspect ?? 1.0);
+    const bl = pose.blush ?? 0; if (bl > 0) for (const sd of [-1, 1]) blush(c, sd * .31 * s, eyeY + eh * .62, .09 * s, spec.blushColor || '#f39a8f', .45 * bl, spec.blushLines !== false);
     for (const sd of [-1, 1]) {
       c.save(); c.translate(sd * eyeX, eyeY); c.rotate(-sd * (ey.tilt || 0));
       const st = Array.isArray(pose.eyes) ? pose.eyes[sd < 0 ? 0 : 1] : (pose.eyes || 'round');
       const op = Array.isArray(pose.eyeOpen) ? pose.eyeOpen[sd < 0 ? 0 : 1] : (pose.eyeOpen ?? 1);
-      animeEye(c, ew, eh, { style: st, open: op, iris: ey.iris || '#3ec7c0', look: pose.look, side: sd, ink: inkC, lash: ey.lash ?? .6, brow: pose.brow ? { y: pose.brow.y ?? .55, angle: pose.brow.angle || 0, w: 1.6, color: hd } : null });
+      animeEye(c, ew, eh, { style: st, open: op, iris: ey.iris || '#3ec7c0', look: pose.look, side: sd, ink: inkC, lash: ey.lash ?? .7, brow: pose.brow ? { y: pose.brow.y ?? .55, angle: pose.brow.angle || 0, w: 1.6, color: hd } : null });
       c.restore();
     }
-    const mo = spec.mouth || {};
+    const mo = spec.mouth || {}, mk = pose.mouth || 'smile';
     c.save(); c.translate((mo.x || 0) * s, ((mo.y ?? .84) - .5) * s);
-    mouth(c, pose.mouthPts || mouthPts(pose.mouth || 'smile'), (mo.width ?? .11) * s, { fang: pose.fang, teeth: pose.teeth, ink: inkC });
+    mouth(c, pose.mouthPts || mouthPts(mk), (mo.width ?? .12) * s, { fang: pose.fang, teeth: pose.teeth ?? (mk === 'yell' ? 'zig' : false), ink: inkC });
     c.restore();
-    // hair volume behind the bangs (skull + volume), then the bangs
-    const vol = hair.volume ?? .1, hairline = hair.bangs?.hairline ?? .28;
-    const capPts = []; for (let i = 0; i <= 12; i++) { const a = Math.PI + i / 12 * Math.PI; capPts.push([Math.cos(a) * (.5 + vol), -.02 + Math.sin(a) * (.5 + vol) * 1.02]); }
-    capPts.push([.5 + vol, hairline - .45], [0, hairline - .38], [-.5 - vol, hairline - .45]);
-    const bangList = bangs(hair.bangs || {}, sway);
-    const bangShapes = bangList.map(t => { const tip = t.spine[2], mid = t.spine[1]; return { pts: H(hairTuft(t.spine, t.w, t.round)), fill: hc,
-      shade: [{ pts: H([[mid[0] - .5, mid[1] + .1], [mid[0] + .5, mid[1] + .1], [tip[0] + .5, tip[1] + .3], [tip[0] - .5, tip[1] + .3]]), color: hd, alpha: .22 }] }; });
-    group(c, [{ pts: H(capPts), fill: hc, tension: .9 }].concat(bangShapes), { lw, outline: inkC });
-    if (hair.highlight !== false) { // angel ring: a crescent high on the crown with a zig-zag lower edge, clipped to the hair
-      const r0 = .5 + vol, zz = []; for (let i = 0; i <= 10; i++) { const a = Math.PI * (1.12 + i / 10 * .76); zz.push([Math.cos(a) * r0 * .9, -.02 + Math.sin(a) * r0 * .86]); }
-      for (let i = 10; i >= 0; i--) { const a = Math.PI * (1.12 + i / 10 * .76); zz.push([Math.cos(a) * r0 * .9, -.02 + Math.sin(a) * r0 * .86 + .07 + (i % 2 ? .04 : 0), 'c']); }
-      c.save(); c.beginPath(); tracePath(c, H(capPts), { tension: .9, raw: true }); for (const b of bangShapes) tracePath(c, b.pts, { raw: true }); c.clip();
-      shape(c, H(zz), { fill: hl, alpha: .7, tension: .5 }); c.restore();
+    // bangs (front), crown highlight clipped to the hair
+    // crown piece (the upper part of the hair mass) in the SAME group as the bangs, so no seam line appears at the roots
+    const hlY = (hair.bangs?.hairline ?? .3) - .5, crown = []; for (let i = 0; i <= 14; i++) { const a = Math.PI + i / 14 * Math.PI; crown.push([Math.cos(a) * (.5 + vol), -.06 + Math.sin(a) * (.5 + vol * .8)]); } crown.push([.5 + vol, hlY - .1], [0, hlY - .06], [-.5 - vol, hlY - .1]);
+    group(c, [{ pts: H(crown), fill: hc, tension: .9 }].concat(bangList.map((t, i) => ({ pts: H(bangPolys[i]), fill: hc, shade: crescent(bangPolys[i], hd, 1, .045, .03) }))), { lw, outline: inkC });
+    if (hair.highlight !== false) {
+      const r0 = .5 + vol, zz = []; for (let i = 0; i <= 10; i++) { const a = Math.PI * (1.15 + i / 10 * .7); zz.push([Math.cos(a) * r0 * .8, -.02 + Math.sin(a) * r0 * .62]); }
+      for (let i = 10; i >= 0; i--) { const a = Math.PI * (1.15 + i / 10 * .7); zz.push([Math.cos(a) * r0 * .8, -.02 + Math.sin(a) * r0 * .62 + .07 + (i % 2 ? .04 : 0), 'c']); }
+      c.save(); c.beginPath(); tracePath(c, H(mass), { raw: true }); for (const p of bangPolys) tracePath(c, H(p), { raw: true }); c.clip();
+      shape(c, H(zz), { fill: mixCol(hc, hl, .6), alpha: .7, tension: .5 }); c.restore();
     }
     for (const st of hair.streaks || []) ink(c, H(st.spine), s * st.w, st.color || hd, 'inout');
-    // hat
+    // hat (cap): dome over the crown, brim as a crescent curving forward, shadow under the brim on the face
     if (spec.hat && spec.hat.kind === 'cap') {
-      const hcol = spec.hat.color || '#222228', bc = spec.hat.brim || '#c2323c', r = .5 + vol + .04;
-      const dome = []; for (let i = 0; i <= 10; i++) { const a = Math.PI + i / 10 * Math.PI; dome.push([Math.cos(a) * r, -.08 + Math.sin(a) * r * 1.05]); } dome.push([r, -.16], [0, -.2], [-r, -.16]);
-      group(c, [{ pts: H(dome), fill: hcol, tension: .9, shade: [{ pts: H([[.1, -2], [1, -2], [1, 0], [.2, 0]]), color: '#000', alpha: .35 }], light: [{ pts: H([[-.5, -.7], [-.2, -.8], [-.15, -.5], [-.45, -.4]]), color: '#55555f', alpha: .35 }] },
-        { pts: H([[-r + .02, -.16], [-.4, -.26], [0, -.3], [.4, -.26], [r - .02, -.16], [.42, -.02], [0, .04], [-.42, -.02]]), fill: bc, shade: [{ pts: H([[-1, -.14], [1, -.14], [1, 0], [-1, 0]]), color: '#000', alpha: .3 }] }], { lw, outline: inkC });
-      for (const x of [-.25, 0, .25]) ink(c, H([[x * .6, -.08 - r * .95], [x, -.22]]), lw * .35, 'rgba(0,0,0,.45)', 'inout');
+      const hcol = spec.hat.color || '#222228', bc = spec.hat.brim || '#c2323c', r = .5 + vol + .03, by = -.5 + (spec.hat.y ?? .22);
+      const dome = []; for (let i = 0; i <= 12; i++) { const a = Math.PI + i / 12 * Math.PI; dome.push([Math.cos(a) * r, by + Math.sin(a) * r * 1.02 + .02]); } dome.push([r, by + .02], [0, by + .06], [-r, by + .02]);
+      const brim = [[-r * .98, by - .02], [-r * .55, by - .08], [0, by - .1], [r * .55, by - .08], [r * .98, by - .02], [r * .95, by + .06], [r * .55, by + .14], [0, by + .17], [-r * .55, by + .14], [-r * .95, by + .06]];
+      c.save(); tracePath(c, face); c.clip(); shape(c, H(shift(brim, 0, .07)), { fill: skinDk, alpha: .35 }); c.restore();
+      group(c, [{ pts: H(dome), fill: hcol, tension: .9, shade: crescent(dome, '#000', 1, .07, .04), light: [{ pts: H([[-.5, -.9], [-.2, -1], [-.15, -.6], [-.45, -.55]]), color: '#55555f', alpha: .35 }] },
+        { pts: H(brim), fill: bc, tension: .8, shade: [{ pts: H([[-1, by + .06], [1, by + .06], [1, 1], [-1, 1]]), color: '#000', alpha: .3 }] }], { lw, outline: inkC });
+      for (const x of [-.22, 0, .22]) ink(c, H([[x * .5, by - r * .95 + .04], [x, by]]), lwi * .7, 'rgba(0,0,0,.4)', 'inout');
     }
     // ahoge
-    if (hair.ahoge) { const ah = hair.ahoge === true ? {} : hair.ahoge, kind = ah.kind || 'loop', x0 = ah.x ?? 0, y0 = -.5 - vol + .02;
-      const sp = kind === 'loop' ? [[x0 - .03, y0], [x0 - .1 + sway * .03, y0 - .22], [x0 + .02 + sway * .06, y0 - .34, 'c'], [x0 + .12 + sway * .03, y0 - .2], [x0 + .05, y0]] : [[x0, y0], [x0 + .06 + sway * .05, y0 - .2], [x0 + .2 + sway * .1, y0 - .32]];
+    if (hair.ahoge) { const ah = hair.ahoge === true ? {} : hair.ahoge, kind = ah.kind || 'loop', x0 = ah.x ?? 0, y0 = -.06 - (.5 + vol * .8) + .02;
+      const sp = kind === 'loop' ? [[x0 - .03, y0], [x0 - .1 + sway * .03, y0 - .2], [x0 + .02 + sway * .06, y0 - .3, 'c'], [x0 + .12 + sway * .03, y0 - .18], [x0 + .05, y0]] : [[x0, y0], [x0 + .06 + sway * .05, y0 - .18], [x0 + .2 + sway * .1, y0 - .3]];
       group(c, [{ pts: H(taper(sp, u => .06 * (1 - u * .5), { samples: 24 })), fill: hc }], { lw: lw * .9, outline: inkC }); }
     // ears (on top of hair and hat)
     if (spec.ears) for (const sd of [-1, 1]) {
-      const tw2 = (pose.earTwitch || 0), e = catEar({ ...spec.ears, tilt: (spec.ears.tilt ?? .15) + tw2 * .3 + sway * .1 }, sd);
-      group(c, [{ pts: H(e.outer), fill: spec.ears.color || hc, tension: .9, shade: hairShade([[sd * .3, -1.5], [sd * 1.5, -1.5], [sd * 1.5, .0], [sd * .45, .0]]) },
-        { pts: H(e.inner), fill: spec.ears.inner || '#f3f0ee', tension: .9, shade: [{ pts: H([[sd * .4, -1.5], [sd * 1.5, -1.5], [sd * 1.5, .0], [sd * .55, -.3]]), color: '#c9c3c0', alpha: .5 }] }], { lw, outline: inkC });
+      const tw2 = (pose.earTwitch || 0), e = catEar({ ...spec.ears, tilt: (spec.ears.tilt ?? .4) + tw2 * .3 + sway * .1 }, sd, vol);
+      group(c, [{ pts: H(e.outer), fill: spec.ears.color || hc, tension: .9, shade: crescent(e.outer, hd, 1, .05, .04) },
+        { pts: H(e.inner), fill: spec.ears.inner || '#f3f0ee', tension: .9, shade: crescent(e.inner, '#c9c3c0', 1, .03, .03) }], { lw, outline: inkC });
       for (const f of e.fluff) shape(c, H(f), { fill: '#ffffff', alpha: .9 });
     }
-    if (spec.hairclip) { const sd = spec.hairclip.side || -1; c.save(); c.translate(sd * .33 * s, -.1 * s); c.rotate(sd * .5); shape(c, H(roundRectPts(-.06, -.02, .12, .04, .01)), { fill: spec.hairclip.color || '#e9e9ef', stroke: inkC, lw: lw * .5 }); c.restore(); }
+    if (spec.hairclip) { const sd = spec.hairclip.side || -1; c.save(); c.translate(sd * .34 * s, -.12 * s); c.rotate(sd * .5); shape(c, H(roundRectPts(-.06, -.02, .12, .04, .01)), { fill: spec.hairclip.color || '#e9e9ef', stroke: inkC, lw: lwi }); c.restore(); }
     if (pose.emote) emote(c, pose.emote.kind, (pose.emote.x ?? .55) * s, (pose.emote.y ?? -.55) * s, (pose.emote.s ?? .16) * s, pose.emote.age ?? 1, pose.emote.color);
     c.restore(); // head
     if (raised.length) { c.save(); c.translate(0, .46 * s); for (const [sd, a] of raised) sleeve(sd, a); c.restore(); }
     c.restore();
   }
 
-  Object.assign(window, { chibi, PARTS: { head, bangs, sideLocks, backHair, catEar, tuftSpine, hairTuft, hairProfile, torso, capsule } });
+  Object.assign(window, { chibi, PARTS: { head, hairMass, bangs, sideLocks, backHair, catEar, tuftSpine, hairTuft, hairProfile, torso, capsule, fist } });
 })();
