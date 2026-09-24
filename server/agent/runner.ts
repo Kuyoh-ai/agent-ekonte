@@ -9,6 +9,7 @@ import { loadBrief, loadProject, loadStoryboard, projectDir, updateProject, Http
 import { openComments, projectContext, subagents, systemAppend, taskPrompt, type AgentTask } from './prompts.ts';
 import { studioServer } from './tools.ts';
 import { runMock } from './mock.ts';
+import { agentEnv, describeAccount } from '../auth.ts';
 
 export const MOCK = process.env.STUDIO_MOCK === '1';
 
@@ -97,6 +98,10 @@ function toolSummary(name: string, input: Record<string, unknown>, dir: string):
 export async function startRun(slug: string, task: AgentTask, message: string, opts: { shotIds?: string[] } = {}) {
   if (running.has(slug)) throw new HttpError(409, 'Claude はすでにこのプロジェクトで作業中です');
   const dir = projectDir(slug);
+  if (!MOCK) {
+    const p = await loadProject(slug);
+    try { agentEnv(p.auth); } catch (e) { throw new HttpError(400, (e as Error).message); }
+  }
   const run: Run = { id: newId(), task, abort: new AbortController(), startedAt: Date.now() };
   running.set(slug, run);
   publish(slug, { type: 'agent-state', running: true, runId: run.id, task });
@@ -131,6 +136,7 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
           await inputDone;
         }
         const tasks = new Set<string>();
+        let announced = false;
         const q = query({
           prompt: input(),
           options: {
@@ -146,14 +152,16 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
             mcpServers: { studio: studioServer(slug, task) },
             canUseTool: policy(dir, task, msg => { record({ role: 'system', text: msg }); }),
             agents: task === 'drafts' || task === 'build' ? subagents(ENGINE_DIR, project.models) : undefined,
-            env: childEnv(),
+            env: agentEnv(project.auth),
             abortController: run.abort,
             stderr: (d: string) => { if (/error/i.test(d)) console.error('[agent]', d.trim()); },
           },
         });
         for await (const m of q as AsyncIterable<SDKMessage>) {
-          if (m.type === 'system' && m.subtype === 'init' && m.session_id && project.sessions[key] !== m.session_id) {
-            await updateProject(slug, p => { p.sessions[key] = m.session_id; });
+          if (m.type === 'system' && m.subtype === 'init') {
+            if (m.session_id && project.sessions[key] !== m.session_id) await updateProject(slug, p => { p.sessions[key] = m.session_id; });
+            // Say which account / billing this run actually uses.
+            if (!announced) { announced = true; q.accountInfo().then(a => record({ role: 'system', text: `接続: ${describeAccount(project.auth, a)} · モデル ${model}` })).catch(() => {}); }
           }
           if (m.type === 'assistant') {
             const sub = m.parent_tool_use_id ? 'サブエージェント' : undefined;
@@ -197,16 +205,6 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
 export function stopRun(slug: string) {
   const r = running.get(slug); if (!r) return false;
   r.abort.abort(); return true;
-}
-
-// When the studio itself is started from inside a Claude Code session, that session's identity variables would leak
-// into the agents (shared session ids, inherited effort, auto-backgrounding). Keep credentials and proxies; drop those.
-const SESSION_VARS = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_REMOTE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_PID',
-  'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_ADDITIONAL_DIRECTORIES', 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD', 'CLAUDE_AFTER_LAST_COMPACT', 'CLAUDE_EFFORT'];
-function childEnv() {
-  const env: Record<string, string | undefined> = { ...process.env };
-  for (const k of SESSION_VARS) delete env[k];
-  return env;
 }
 
 const labelOf = (t: AgentTask) => ({ plan: '構成案', review: 'レビュー反映', drafts: 'ラフ絵コンテ', build: '本制作', retake: 'リテイク' })[t];

@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { ENGINE_DIR, ROOT_DIR, findChrome, projectMounts, resolveMount, sendFile } from '../engine/tools.mjs';
 import { FFMPEG, FFPROBE, buildMix, estimateTempo, parseLyrics, probeDuration, retimeForNarration, saveUpload, toolVersion, voicevoxSpeakers, voicevoxSynth } from './audio.ts';
 import { chatHistory, currentRun, MOCK, startRun, stopRun } from './agent/runner.ts';
+import { checkAuth, keyStatus, saveApiKey, type AuthMode } from './auth.ts';
 import type { AgentTask } from './agent/prompts.ts';
 import { publish, subscribe, projectChanged } from './events.ts';
 import * as git from './git.ts';
@@ -35,8 +36,25 @@ app.get('/api/health', async c => {
   const [ffmpeg, ffprobe, gitOk] = await Promise.all([toolVersion(FFMPEG), toolVersion(FFPROBE), git.isAvailable()]);
   return c.json({
     mock: MOCK, projectsDir: PROJECTS_DIR, chrome: findChrome(), ffmpeg: !!ffmpeg, ffprobe: !!ffprobe, git: gitOk,
-    auth: process.env.ANTHROPIC_API_KEY ? 'api-key' : 'claude-login', node: process.version,
+    node: process.version,
   });
+});
+
+// ---------- Claude connection ----------
+app.get('/api/auth', c => c.json(keyStatus()));
+app.put('/api/auth/key', async c => {
+  const b = await body<{ key?: string | null }>(c);
+  const key = b.key?.trim() || null;
+  if (key && !/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) throw new HttpError(400, 'API キーの形式が正しくありません（sk-ant- で始まるキーを入力してください）');
+  saveApiKey(key); return c.json(keyStatus());
+});
+app.post('/api/projects/:slug/auth/check', async c => {
+  const slug = c.req.param('slug'); const b = await body<{ mode?: AuthMode }>(c);
+  const p = await loadProject(slug), mode = b.mode || p.auth;
+  const r = MOCK ? { ok: true, mode, summary: 'モックモード（Claude は呼び出しません）' } : await checkAuth(mode);
+  await updateProject(slug, x => { x.auth = mode; x.authInfo = { ok: r.ok, summary: r.ok ? r.summary : ('error' in r ? String(r.error) : ''), at: new Date().toISOString(), mode }; });
+  touched(slug, 'auth');
+  return c.json(r);
 });
 
 // ---------- projects ----------
@@ -50,12 +68,13 @@ app.get('/api/projects/:slug', async c => {
   const slug = c.req.param('slug');
   const all = await loadAll(slug);
   const run = currentRun(slug);
-  return c.json({ ...all, running: run ? { id: run.id, task: run.task, startedAt: run.startedAt } : null, exporting: exportRunning(slug) });
+  return c.json({ ...all, running: run ? { id: run.id, task: run.task, startedAt: run.startedAt } : null, exporting: exportRunning(slug), mock: MOCK });
 });
 app.patch('/api/projects/:slug', async c => {
   const slug = c.req.param('slug'), patch = await body<Partial<Project>>(c);
-  const allowed = ['name', 'step', 'format', 'captions', 'models', 'effort', 'budgetUsd', 'approvals', 'audio'] as const;
+  const allowed = ['name', 'step', 'format', 'captions', 'models', 'effort', 'budgetUsd', 'approvals', 'audio', 'auth', 'look'] as const;
   const p = await updateProject(slug, p => {
+    if (patch.auth && patch.auth !== p.auth) p.authInfo = undefined;
     for (const k of allowed) if (patch[k] !== undefined) {
       const v = patch[k] as unknown;
       (p as Record<string, unknown>)[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(p as Record<string, unknown>)[k] as object, ...v } : v;
@@ -107,6 +126,43 @@ app.post('/api/projects/:slug/shots/status', async c => {
   const slug = c.req.param('slug'); const b = await body<{ ids: string[]; status: string; note?: string }>(c);
   await updateStoryboard(slug, sb => { for (const s of sb.chapters.flatMap(ch => ch.shots)) if (b.ids.includes(s.id)) { s.status = b.status as never; if (b.note !== undefined) s.statusNote = b.note; } });
   touched(slug, 'status'); return c.json({ ok: true });
+});
+
+// ---------- image assets (@img1, @img2, ...) ----------
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|svg|avif)$/i;
+app.post('/api/projects/:slug/assets', async c => {
+  const slug = c.req.param('slug'), dir = projectDir(slug);
+  const form = await c.req.parseBody(); const file = form.file;
+  if (!(file instanceof File)) throw new HttpError(400, '画像ファイルを選んでください');
+  if (!IMAGE_EXT.test(file.name)) throw new HttpError(400, `対応していない形式です: ${file.name}（png / jpg / webp / gif / svg / avif）`);
+  if (file.size > 40 << 20) throw new HttpError(400, '画像は 40MB までです');
+  const p0 = await loadProject(slug);
+  const n = p0.assets.reduce((m, a) => Math.max(m, +(a.id.replace(/\D/g, '')) || 0), 0) + 1, id = `img${n}`;
+  const safe = file.name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+/, '') || 'image';
+  const rel = `assets/images/${id}-${safe}`;
+  mkdirSync(join(dir, 'assets', 'images'), { recursive: true });
+  await writeFile(join(dir, rel), Buffer.from(await file.arrayBuffer()));
+  const p = await updateProject(slug, x => {
+    x.assets.push({ id, file: rel, name: String(form.name || file.name.replace(/\.[^.]+$/, '')), description: String(form.description || ''), width: +(form.width || 0), height: +(form.height || 0) });
+  });
+  touched(slug, 'assets');
+  return c.json({ id, project: p });
+});
+app.patch('/api/projects/:slug/assets/:id', async c => {
+  const { slug, id } = c.req.param(); const b = await body<{ name?: string; description?: string }>(c);
+  const p = await updateProject(slug, x => {
+    const a = x.assets.find(y => y.id === id); if (!a) throw new HttpError(404, 'asset not found');
+    if (b.name !== undefined) a.name = String(b.name); if (b.description !== undefined) a.description = String(b.description);
+  });
+  touched(slug, 'assets'); return c.json(p);
+});
+app.delete('/api/projects/:slug/assets/:id', async c => {
+  const { slug, id } = c.req.param();
+  const p = await updateProject(slug, x => {
+    const a = x.assets.find(y => y.id === id); if (!a) throw new HttpError(404, 'asset not found');
+    rmSync(join(projectDir(slug), a.file), { force: true }); x.assets = x.assets.filter(y => y.id !== id);
+  });
+  touched(slug, 'assets'); return c.json(p);
 });
 
 // ---------- history ----------

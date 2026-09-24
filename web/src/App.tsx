@@ -83,7 +83,7 @@ function Home() {
                 <span className={health.chrome ? 'ok' : 'ng'}>Chrome {health.chrome ? '' : '（見つかりません: CHROME_PATH を設定）'}</span>
                 <span className={health.ffmpeg ? 'ok' : 'ng'}>ffmpeg</span>
                 <span className={health.git ? 'ok' : 'ng'}>git（履歴）</span>
-                <span className="ok">Claude: {health.mock ? 'モック（STUDIO_MOCK=1）' : health.auth === 'api-key' ? 'API キー' : 'Claude Code のログイン'}</span>
+                {health.mock && <span className="ok">Claude: モック（STUDIO_MOCK=1）</span>}
                 <span>保存先: <span className="mono">{health.projectsDir}</span></span>
               </div>
             </section>

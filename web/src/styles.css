@@ -255,3 +255,22 @@ video.final { width: 100%; max-height: 70vh; background: #000; border-radius: va
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: var(--radius-sm); z-index: 60; font-size: 13.5px; box-shadow: var(--shadow); max-width: min(90vw, 640px); }
 .toast.err { background: var(--err); color: #fff; }
 .server-wait { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 70; background: var(--panel); border: 1px solid var(--line-2); border-radius: 99px; padding: 6px 14px; box-shadow: var(--shadow); font-size: 13px; }
+.choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.choice-grid.five { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+@media (max-width: 700px) { .choice-grid { grid-template-columns: 1fr; } }
+.choice { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; border-radius: var(--radius); border: 1.5px solid var(--line-2); background: var(--panel); cursor: pointer; }
+.choice span { font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+.choice:hover { border-color: var(--faint); }
+.choice[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.err-text { color: var(--err); }
+.drop { border: 1.5px dashed var(--line-2); border-radius: var(--radius); padding: 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.asset { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.asset-thumb { aspect-ratio: 4 / 3; border-radius: var(--radius-sm); overflow: hidden; display: grid; place-items: center;
+  background: repeating-conic-gradient(var(--sunken) 0 25%, var(--panel) 0 50%) 0 0 / 16px 16px; }
+.asset-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.mention { display: inline-flex; align-items: center; gap: 4px; font: 600 12px/1 var(--mono); padding: 3px 7px; border-radius: 99px; border: 1px solid color-mix(in srgb, var(--info) 45%, transparent); background: var(--info-soft); color: var(--info); cursor: pointer; }
+.mention.with-thumb img { width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
+.mention.inline { cursor: default; vertical-align: -3px; padding: 1px 6px 1px 2px; }
+.asset-chips { gap: 5px; }

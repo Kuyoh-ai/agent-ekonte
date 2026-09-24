@@ -4,6 +4,7 @@ import type { Brief, Chapter, Project, Shot, Storyboard, StepId } from '../../se
 import type { ChatEntry, StudioEvent } from '../../server/events.ts';
 
 export type { Brief, Chapter, Project, Shot, Storyboard, StepId, ChatEntry };
+export type Asset = Project['assets'][number];
 export type AgentTask = 'plan' | 'review' | 'drafts' | 'build' | 'retake';
 
 export interface ProjectData {
@@ -11,8 +12,10 @@ export interface ProjectData {
   files: { drafts: Record<string, number>; chapters: string[]; finalVideo: number; frames: number; mix: number };
   running: { id: string; task: AgentTask; startedAt: number } | null;
   exporting: boolean;
+  mock: boolean;
 }
-export interface Health { mock: boolean; projectsDir: string; chrome: string | null; ffmpeg: boolean; ffprobe: boolean; git: boolean; auth: string; node: string }
+export interface Health { mock: boolean; projectsDir: string; chrome: string | null; ffmpeg: boolean; ffprobe: boolean; git: boolean; node: string }
+export interface KeyStatus { saved: string | null; env: string | null; file: string | null }
 export interface ProjectSummary { slug: string; name: string; step: StepId; updatedAt: string; shots: number; hasVideo: boolean }
 export interface Revision { id: string; message: string; at: string; files: number }
 export interface Tempo { bpm: number; offset: number; confidence: number; candidates?: { bpm: number; score: number }[] }
@@ -56,6 +59,9 @@ export function useServerWaiting() {
 const P = (slug: string) => `/api/projects/${slug}`;
 export const api = {
   health: () => req<Health>('GET', '/api/health'),
+  authStatus: () => req<KeyStatus>('GET', '/api/auth'),
+  saveKey: (key: string | null) => req<KeyStatus>('PUT', '/api/auth/key', { key }),
+  checkAuth: (slug: string) => req<{ ok: boolean; summary: string; error?: string }>('POST', `/api/projects/${slug}/auth/check`, {}),
   projects: () => req<ProjectSummary[]>('GET', '/api/projects'),
   create: (name: string, format: Partial<Project['format']>) => req<Project>('POST', '/api/projects', { name, format }),
   get: (slug: string) => req<ProjectData>('GET', P(slug)),
@@ -66,6 +72,12 @@ export const api = {
   comment: (slug: string, shotId: string, text: string) => req('POST', `${P(slug)}/shots/${shotId}/comments`, { text }),
   editComment: (slug: string, shotId: string, cid: string, patch: { resolved?: boolean; delete?: boolean }) => req('PATCH', `${P(slug)}/shots/${shotId}/comments/${cid}`, patch),
   setStatus: (slug: string, ids: string[], status: Shot['status'], note?: string) => req('POST', `${P(slug)}/shots/status`, { ids, status, note }),
+  uploadAsset: (slug: string, file: File, dims: { width: number; height: number }) => {
+    const f = new FormData(); f.append('file', file); f.append('width', String(dims.width)); f.append('height', String(dims.height));
+    return req<{ id: string; project: Project }>('POST', `${P(slug)}/assets`, f);
+  },
+  patchAsset: (slug: string, id: string, patch: { name?: string; description?: string }) => req<Project>('PATCH', `${P(slug)}/assets/${id}`, patch),
+  deleteAsset: (slug: string, id: string) => req<Project>('DELETE', `${P(slug)}/assets/${id}`),
   history: (slug: string) => req<Revision[]>('GET', `${P(slug)}/history`),
   saveVersion: (slug: string, message: string) => req<{ id: string | null }>('POST', `${P(slug)}/history/save`, { message }),
   restore: (slug: string, id: string) => req('POST', `${P(slug)}/history/restore`, { id }),
