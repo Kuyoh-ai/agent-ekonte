@@ -197,3 +197,25 @@ with a .02 H bulge above it.
 tapered both ends, no line where a front part overlaps a back part.
 
 Acceptance for a rule = its rubric item scores ≥ 4 from the external judge on both reference characters.
+
+### Amendments after judge round v9 (scores 2.1 / 2.1 avg; what the rules missed)
+
+- **R2'** contrast must be visible at thumbnail size: big : small width = 1 : .45, notch depth 1 : .3, tilt 12°–30°,
+  curl .4, and the centre tuft sweeps to the parting side as an S. Do not fill the gaps between tufts with sub-tufts.
+- **R3'** long hair: the mass ends at the shoulders; below it 3–4 tapered S bundles per side with pointed tips, never
+  one flat sheet.
+- **R4'** the tail rises only .12 H above the knot before falling; it stays beside the head, not above it.
+- **R5'** inner-ear fur = 2–3 zig-zag tufts, never dots. With a cap the ears stand on the dome (10 / 2 o'clock of the
+  crown), base hidden by the crown's outline; hands never touch the ears.
+- **R6'** cap crown width = 1.3–1.4 × face width, covering the top third of the head; brim lens depth .13 H with a
+  thickness band; brim casts a shadow band on the face.
+- **R8'** jacket fronts and hoodie start at the collar and slope down to the shoulder (no flat top edge).
+- **R9'** hanging sleeves are drawn in front of the jacket fronts; raised arms are asymmetric (one fist above the head,
+  the other at chest height) unless the pose says both.
+- **R11'** turtleneck = torus: outer ellipse .62 × .16 H, inner ellipse .4 × .07 H darker; the chin sits inside it.
+- **Eyes'** iris = 76 % of the eye width, vertical ellipse; upper lid = crescent thickest at the outer corner; lash
+  flicks 2–3; xx eyes keep a gap of .1 W between the inner vertices.
+- **R13'** separation lines between hair tufts and inside the cloth are thin (.008 H) and tapered; only the union
+  outline is thick. No stray lines (sole line stays inside the shoe).
+- **R7'** bangs shadow alpha .4 offset .06 H; brim shadow on the forehead; side shading uses horizontal offset only so
+  it never forms a band across the shoulders.
