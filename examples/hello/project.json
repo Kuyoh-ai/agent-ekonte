@@ -1,0 +1,7 @@
+{
+  "name": "Hello Runtime",
+  "slug": "hello",
+  "format": { "width": 1280, "height": 720, "fps": 24, "duration": 6 },
+  "audio": {},
+  "captions": "subtitle"
+}

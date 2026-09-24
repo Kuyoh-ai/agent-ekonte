@@ -1,3 +1,6 @@
 node_modules/
+projects/
 out/
-assets/source.mp4
+.DS_Store
+web/dist/
+*.log
