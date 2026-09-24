@@ -223,7 +223,9 @@ app.get('/api/projects/:slug/events', c => {
   const slug = c.req.param('slug'); projectDir(slug);
   return streamSSE(c, async stream => {
     const off = subscribe(slug, e => { stream.writeSSE({ data: JSON.stringify(e) }).catch(() => {}); });
-    const ping = setInterval(() => { stream.writeSSE({ event: 'ping', data: '' }).catch(() => {}); }, 20000);
+    // Heartbeat: the GUI reconnects when pings stop (a dev proxy can keep a dead stream open after a server restart).
+    await stream.writeSSE({ event: 'ping', data: '' }).catch(() => {});
+    const ping = setInterval(() => { stream.writeSSE({ event: 'ping', data: '' }).catch(() => {}); }, 5000);
     await new Promise<void>(r => stream.onAbort(() => r()));
     clearInterval(ping); off();
   });
@@ -256,8 +258,13 @@ if (PROD) {
   });
 }
 
-serve({ fetch: app.fetch, port: PORT, hostname: '127.0.0.1' }, info => {
+const server = serve({ fetch: app.fetch, port: PORT, hostname: '127.0.0.1' }, info => {
   const url = `http://localhost:${PROD ? info.port : 5173}`;
-  console.log(`\n  Agent Video Studio  →  ${url}${MOCK ? '   (STUDIO_MOCK=1: Claude is not called)' : ''}\n  projects: ${PROJECTS_DIR}\n`);
+  console.log(`\n  Agent Video Studio  →  ${url}${MOCK ? '   (STUDIO_MOCK=1: Claude is not called)' : ''}\n  API: http://127.0.0.1:${info.port}   projects: ${PROJECTS_DIR}\n`);
+});
+server.on('error', (e: NodeJS.ErrnoException) => {
+  if (e.code === 'EADDRINUSE') console.error(`\n  ポート ${PORT} は別のプロセスが使用中です。そのプロセスを止めるか、PORT=8788 npm run dev のように別のポートで起動してください。\n`);
+  else console.error(e);
+  process.exit(1);
 });
 export { STEPS };

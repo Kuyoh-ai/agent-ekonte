@@ -254,3 +254,4 @@ video.final { width: 100%; max-height: 70vh; background: #000; border-radius: va
 .rev .btn { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: var(--radius-sm); z-index: 60; font-size: 13.5px; box-shadow: var(--shadow); max-width: min(90vw, 640px); }
 .toast.err { background: var(--err); color: #fff; }
+.server-wait { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 70; background: var(--panel); border: 1px solid var(--line-2); border-radius: 99px; padding: 6px 14px; box-shadow: var(--shadow); font-size: 13px; }

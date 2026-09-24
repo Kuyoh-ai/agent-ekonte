@@ -21,10 +21,36 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, headers: {} };
   if (body instanceof FormData) init.body = body;
   else if (body !== undefined) { init.body = JSON.stringify(body); (init.headers as Record<string, string>)['Content-Type'] = 'application/json'; }
-  const r = await fetch(url, init);
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((data as { error?: string }).error || `${r.status} ${r.statusText}`);
-  return data as T;
+  // In dev the GUI (Vite) is usually up before the API server, and `tsx watch` restarts it on every edit. The proxy then
+  // answers 502/503/504 or the connection fails without reaching the server, so waiting and retrying is safe for every
+  // method. Give up after ~30 s with a message that points at the server log.
+  for (let attempt = 0; ; attempt++) {
+    let r: Response | null = null;
+    try { r = await fetch(url, init); } catch { r = null; }
+    if (r && ![502, 503, 504].includes(r.status)) {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((data as { error?: string }).error || `${r.status} ${r.statusText}`);
+      return data as T;
+    }
+    if (attempt >= 40) throw new Error('サーバーに接続できません。`npm run dev` のターミナルに [server] のエラーが出ていないか確認してください。');
+    serverWaiting(true);
+    await new Promise(res => setTimeout(res, Math.min(250 + attempt * 150, 1000)));
+  }
+}
+
+// Lets the UI show "starting the server…" while requests are being retried.
+type WaitListener = (waiting: boolean) => void;
+const waitListeners = new Set<WaitListener>();
+let waitTimer: ReturnType<typeof setTimeout> | undefined;
+function serverWaiting(on: boolean) {
+  waitListeners.forEach(fn => fn(on));
+  clearTimeout(waitTimer);
+  if (on) waitTimer = setTimeout(() => serverWaiting(false), 1500);
+}
+export function useServerWaiting() {
+  const [w, setW] = useState(false);
+  useEffect(() => { waitListeners.add(setW); return () => { waitListeners.delete(setW); }; }, []);
+  return w;
 }
 
 const P = (slug: string) => `/api/projects/${slug}`;
@@ -82,8 +108,27 @@ export function useProject(slug: string) {
 
   useEffect(() => {
     reload(); api.chat(slug).then(setChat).catch(() => {});
-    const es = new EventSource(`/api/projects/${slug}/events`);
-    es.onmessage = ev => {
+    // EventSource gives up for good when the server answers with an error (e.g. a 502 while it is still starting or
+    // restarting), so reconnect ourselves and refresh everything once the stream is back.
+    let es: EventSource, closed = false, retry: ReturnType<typeof setTimeout> | undefined, wasDown = false, lastSeen = Date.now();
+    const connect = () => {
+      lastSeen = Date.now();
+      es = new EventSource(`/api/projects/${slug}/events`);
+      es.addEventListener('ping', () => { lastSeen = Date.now(); });
+      es.onopen = () => { if (wasDown) { wasDown = false; reload(); api.chat(slug).then(setChat).catch(() => {}); } };
+      es.onerror = () => {
+        wasDown = true; // events may have been missed: refresh when the stream reopens
+        if (es.readyState === EventSource.CLOSED && !closed) retry = setTimeout(connect, 1500);
+      };
+      es.onmessage = onMessage;
+    };
+    // The server pings every 5 s. Silence means the stream is dead even if the connection looks open.
+    const watchdog = setInterval(() => {
+      if (closed || Date.now() - lastSeen < 12000) return;
+      es.close(); clearTimeout(retry); wasDown = true; connect();
+    }, 3000);
+    const onMessage = (ev: MessageEvent) => {
+      lastSeen = Date.now();
       const e = JSON.parse(ev.data) as StudioEvent;
       if (e.type === 'project-updated') reload();
       else if (e.type === 'agent') setChat(c => [...c, e.entry]);
@@ -94,8 +139,8 @@ export function useProject(slug: string) {
       });
       else if (e.type === 'tts') setTts(e);
     };
-    es.onerror = () => { /* EventSource reconnects on its own */ };
-    return () => es.close();
+    connect();
+    return () => { closed = true; clearTimeout(retry); clearInterval(watchdog); es.close(); };
   }, [slug, reload]);
 
   return { data, error, chat, render, tts, reload, version, setRender };
