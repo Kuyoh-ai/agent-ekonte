@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Vector Chibi Demo · studio</title>
+<style>
+  html, body { margin: 0; background: #15161c; color: #e8e8ee; font: 13px system-ui, sans-serif; }
+  #out { display: block; width: 100%; height: auto; max-height: 100vh; object-fit: contain; background: #000; }
+  .studio-bar { display: flex; gap: 10px; align-items: center; padding: 8px 12px; }
+  .studio-bar input { flex: 1; }
+  .studio-bar span { font-variant-numeric: tabular-nums; min-width: 260px; }
+</style>
+<script src="/engine/runtime.js"></script>
+<script src="/engine/kits/motion.js"></script>
+<script src="/engine/kits/vector.js"></script>
+<script src="/engine/kits/chibi.js"></script>
+</head>
+<body>
+<canvas id="out"></canvas>
+<script src="lib/shared.js"></script>
+<script src="chapters/intro.js"></script>
+<script type="module">VIDEO.start();</script>
+</body>
+</html>

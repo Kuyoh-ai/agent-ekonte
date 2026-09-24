@@ -51,7 +51,7 @@ export const Project = z.object({
   budgetUsd: z.number().min(0).default(0), // 0 = no cap per agent run
   approvals: z.object({ storyboard: z.boolean().default(false), drafts: z.boolean().default(false) }).default({ storyboard: false, drafts: false }),
   // Visual approach. 'auto' lets Claude choose (and justify) in the plan; the others pin an engine kit.
-  look: z.enum(['auto', 'painted', 'motion', 'sketch', '3d']).default('auto'),
+  look: z.enum(['auto', 'painted', 'motion', 'sketch', 'anime', '3d']).default('auto'),
   // Image assets the user uploaded; mentioned in any text as @img1, @img2, ...
   assets: z.array(z.object({
     id: z.string(), file: z.string(), name: z.string().default(''), description: z.string().default(''),

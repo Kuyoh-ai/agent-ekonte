@@ -57,10 +57,11 @@ export function projectContext(p: Project, brief: Brief, sb: Storyboard) {
 }
 
 const LOOK_TEXT: Record<string, string> = {
-  auto: 'auto: choose the rendering approach that gives the RICHEST result for this brief, and justify it in style.md. Prefer the painted kit for illustrated, picture-book, hand-made or cute looks; the motion kit for graphic, flat, corporate or typographic looks; three.js for 3D. Never choose for render speed.',
+  auto: 'auto: choose the rendering approach that gives the RICHEST result for this brief, and justify it in style.md. Prefer the painted kit for illustrated, picture-book, hand-made or cute looks; the vector + chibi kits (anime) for characters with faces that act (cel look, morphing eyes and mouths); the motion kit for graphic, flat, corporate or typographic looks; three.js for 3D. Never choose for render speed.',
   painted: 'painted: watercolour and ink on paper with the painted kit (p5 + p5.brush), like examples/pdoom.',
   motion: 'motion graphics: Canvas2D with the motion kit (depth, light, texture, particles, finish overlay), GSAP where useful.',
   sketch: 'hand-drawn sketch: Rough.js line work on top of the motion kit (colour fills, texture, light and depth are still required).',
+  anime: 'anime / vector: cel-shaded vector shapes with the vector kit (Catmull-Rom curves, tapered ink, morphable eyes and mouths) and chibi character rigs from the chibi kit, on top of the motion kit for camera and finish. Follow engine/VECTOR_GUIDE.md.',
   '3d': '3D: three.js with proper lighting, materials, fog and a 2D grain overlay from the motion kit.',
 };
 

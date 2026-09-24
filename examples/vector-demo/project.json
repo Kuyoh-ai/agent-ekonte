@@ -1,0 +1,7 @@
+{
+  "name": "Vector Chibi Demo",
+  "slug": "vector-demo",
+  "format": { "width": 1024, "height": 1024, "fps": 24, "duration": 8 },
+  "audio": {},
+  "captions": "none"
+}

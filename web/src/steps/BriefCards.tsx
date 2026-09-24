@@ -65,6 +65,7 @@ export const LOOKS = [
   { id: 'painted', label: '水彩・絵本', desc: 'p5.brush の水彩とインク線、紙の質感。元の PDoom と同じ描き方のキットを使います。' },
   { id: 'motion', label: 'モーショングラフィックス', desc: 'Canvas2D と GSAP。平面でもグラデーション・奥行き・光・質感を重ねて作り込みます。' },
   { id: 'sketch', label: '手描きスケッチ', desc: 'Rough.js の線画風。ラフな線に塗りと質感を重ねます。' },
+  { id: 'anime', label: 'アニメ・ベクター', desc: 'ベクター図形のセル塗り。ちびキャラのリグ（目・口・髪をモーフィング）で表情豊かに動かします。' },
   { id: '3d', label: '3D', desc: 'three.js。立体・ライティング・カメラワーク。' },
 ] as const;
 
