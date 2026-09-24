@@ -45,6 +45,7 @@ STUDIO_MOCK=1 npm run dev
 | `STUDIO_MOCK=1` | Claude の代わりに簡易的なダミー出力を使う |
 | `STUDIO_MAX_RENDERS` | エージェントのレンダリング確認の同時実行数（既定: 3） |
 | `PORT` | サーバーのポート（既定: 8787） |
+| `STUDIO_DEBUG=1` | エージェントのシステムイベントをサーバーのログに出す |
 | `CHROME_PATH` `FFMPEG_PATH` `FFPROBE_PATH` | 各ツールのパス |
 
 ## 仕組み

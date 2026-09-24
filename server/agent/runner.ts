@@ -1,5 +1,5 @@
 // runner.ts: runs one Claude agent task for a project with the Claude Agent SDK and streams it to the GUI.
-import { query, type CanUseTool, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { query, type CanUseTool, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { appendFile, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { ENGINE_DIR, ROOT_DIR } from '../../engine/tools.mjs';
@@ -72,7 +72,11 @@ const BUILTIN: Record<AgentTask, string[]> = {
 };
 
 function toolSummary(name: string, input: Record<string, unknown>, dir: string): string {
-  const rel = (p: unknown) => (typeof p === 'string' ? relative(dir, resolve(dir, p)).replace(/\\/g, '/') : '');
+  const rel = (p: unknown) => {
+    if (typeof p !== 'string') return '';
+    const abs = resolve(dir, p), r = relative(dir, abs);
+    return (r.startsWith('..') ? relative(ROOT_DIR, abs) : r).replace(/\\/g, '/');
+  };
   switch (name) {
     case 'Read': return `読み込み ${rel(input.file_path)}`;
     case 'Write': return `書き込み ${rel(input.file_path)}`;
@@ -116,8 +120,19 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
       else {
         const model = task === 'plan' || task === 'review' ? project.models.planning : task === 'drafts' ? project.models.drafts : project.models.production;
         const key = sessionKey(task), resume = resumes(task) ? project.sessions[key] : undefined;
+        // Streaming input: a plain string prompt closes stdin at the first result, which breaks permission checks and
+        // the studio MCP tools while background subagents are still working. Keep the input open until the lead agent
+        // has produced a result with no background tasks left.
+        let endInput!: () => void;
+        const inputDone = new Promise<void>(r => { endInput = r; });
+        run.abort.signal.addEventListener('abort', () => endInput(), { once: true });
+        async function* input(): AsyncGenerator<SDKUserMessage> {
+          yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null };
+          await inputDone;
+        }
+        const tasks = new Set<string>();
         const q = query({
-          prompt,
+          prompt: input(),
           options: {
             cwd: dir,
             additionalDirectories: [ENGINE_DIR, join(ROOT_DIR, 'examples')],
@@ -131,6 +146,7 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
             mcpServers: { studio: studioServer(slug, task) },
             canUseTool: policy(dir, task, msg => { record({ role: 'system', text: msg }); }),
             agents: task === 'drafts' || task === 'build' ? subagents(ENGINE_DIR, project.models) : undefined,
+            env: childEnv(),
             abortController: run.abort,
             stderr: (d: string) => { if (/error/i.test(d)) console.error('[agent]', d.trim()); },
           },
@@ -147,9 +163,19 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
             }
           }
           if (m.type === 'user' && Array.isArray(m.message.content) && m.message.content.some(b => typeof b === 'object' && b.type === 'tool_result')) projectChanged(slug, 'agent');
+          if (m.type === 'system') {
+            if (process.env.STUDIO_DEBUG && m.subtype !== 'init') console.log('[agent:system]', m.subtype, JSON.stringify(m).slice(0, 240));
+            if (m.subtype === 'task_started') tasks.add(m.task_id);
+            if (m.subtype === 'task_notification') tasks.delete(m.task_id);
+            if (m.subtype === 'task_updated' && m.patch.status && ['completed', 'failed', 'killed'].includes(m.patch.status)) tasks.delete(m.task_id);
+            if (m.subtype === 'background_tasks_changed') { tasks.clear(); for (const t of m.tasks) if (!t.ambient) tasks.add(t.task_id); }
+          }
           if (m.type === 'result') {
-            cost = m.total_cost_usd || 0;
-            if (m.subtype !== 'success') await record({ role: 'error', text: m.subtype === 'error_max_budget_usd' ? '予算の上限に達したため停止しました。' : `エラーで停止しました: ${m.errors?.join(' / ') || m.subtype}` });
+            if (process.env.STUDIO_DEBUG) console.log('[agent:result]', m.subtype, 'pending tasks:', [...tasks]);
+            cost = Math.max(cost, m.total_cost_usd || 0);
+            if (m.subtype !== 'success') { await record({ role: 'error', text: m.subtype === 'error_max_budget_usd' ? '予算の上限に達したため停止しました。' : `エラーで停止しました: ${m.errors?.join(' / ') || m.subtype}` }); endInput(); }
+            else if (!tasks.size) endInput();
+            else await record({ role: 'system', text: `サブエージェント ${tasks.size} 件の完了を待っています…` });
           }
         }
       }
@@ -171,6 +197,16 @@ export async function startRun(slug: string, task: AgentTask, message: string, o
 export function stopRun(slug: string) {
   const r = running.get(slug); if (!r) return false;
   r.abort.abort(); return true;
+}
+
+// When the studio itself is started from inside a Claude Code session, that session's identity variables would leak
+// into the agents (shared session ids, inherited effort, auto-backgrounding). Keep credentials and proxies; drop those.
+const SESSION_VARS = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_REMOTE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_PID',
+  'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_ADDITIONAL_DIRECTORIES', 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD', 'CLAUDE_AFTER_LAST_COMPACT', 'CLAUDE_EFFORT'];
+function childEnv() {
+  const env: Record<string, string | undefined> = { ...process.env };
+  for (const k of SESSION_VARS) delete env[k];
+  return env;
 }
 
 const labelOf = (t: AgentTask) => ({ plan: '構成案', review: 'レビュー反映', drafts: 'ラフ絵コンテ', build: '本制作', retake: 'リテイク' })[t];
