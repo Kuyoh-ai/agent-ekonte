@@ -46,12 +46,23 @@ export function projectContext(p: Project, brief: Brief, sb: Storyboard) {
   } else lines.push(`## Music\n- none. The target length is about ${f2(p.format.duration)} s; you may adjust it if the story needs it.`);
   if (p.audio.narration.enabled) lines.push(`## Narration\n- enabled (TTS, synthesised later from each shot's "narration" field). Write natural spoken lines. Budget about 7 Japanese characters or 2.5 English words per second, plus ${p.audio.narration.gap}s of air per line; the app stretches shots later to fit the real audio.`);
   lines.push(`## Captions\n- ${p.captions === 'none' ? 'off' : p.captions + ' (drawn by the runtime in the bottom ~14% of the frame)'}`);
+  lines.push(`## Look (chosen by the user)\n- ${LOOK_TEXT[p.look] || LOOK_TEXT.auto}`);
+  if (p.assets.length) lines.push(`## Image assets (uploaded by the user)\nWhen any text says @imgN it means that image. Look at the ones you need with the Read tool before planning or drawing with them.\n` +
+    p.assets.map(a => `- @${a.id}: ${a.file} (${a.width}×${a.height})${a.name ? ` "${a.name}"` : ''}${a.description ? ` — ${a.description}` : ''}`).join('\n'));
   if (sb.chapters.length) {
     lines.push(`## Current storyboard (${sb.chapters.length} chapters, logline: ${sb.logline || '-'})\n` + sb.chapters.map(c =>
       `- [${c.id}] ${f2(c.start)}–${f2(c.end)} ${c.title}\n` + c.shots.map(s => `  - ${s.id} ${f2(s.start)}–${f2(s.end)} (${s.status}) ${s.title}: ${s.action}`).join('\n')).join('\n'));
   }
   return lines.join('\n\n');
 }
+
+const LOOK_TEXT: Record<string, string> = {
+  auto: 'auto: choose the rendering approach that gives the RICHEST result for this brief, and justify it in style.md. Prefer the painted kit for illustrated, picture-book, hand-made or cute looks; the motion kit for graphic, flat, corporate or typographic looks; three.js for 3D. Never choose for render speed.',
+  painted: 'painted: watercolour and ink on paper with the painted kit (p5 + p5.brush), like examples/pdoom.',
+  motion: 'motion graphics: Canvas2D with the motion kit (depth, light, texture, particles, finish overlay), GSAP where useful.',
+  sketch: 'hand-drawn sketch: Rough.js line work on top of the motion kit (colour fills, texture, light and depth are still required).',
+  '3d': '3D: three.js with proper lighting, materials, fog and a 2D grain overlay from the motion kit.',
+};
 
 export function openComments(sb: Storyboard) {
   const out: string[] = [];
@@ -66,18 +77,22 @@ export function taskPrompt(task: AgentTask, ctx: string, userMessage: string, ex
     case 'plan': return `${ctx}${msg}
 
 ## Your task: propose the plan
-1. Read the brief closely. Decide the concept and a structure that serves the purpose and audience.
+1. Read the brief closely (and any image assets it mentions). Decide the concept and a structure that serves the purpose
+   and audience. Aim high: skim ${extra.engineDir}/../examples/pdoom/STORYBOARD.md for the level
+   of invention expected — a visual idea or gag in every shot, recurring motifs that pay off, motivated transitions.
 2. Split the video into chapters (sections of the story: 3–9 for most videos) and shots (usually 1.5–6 s; faster for
-   energetic pieces). Every shot needs a concrete, visual action: something happens on screen. Plan motivated transitions
-   between shots. Keep on-screen text minimal unless the brief needs it.
-3. Write style.md (with the Write tool) as the production bible, with these sections: Concept · Look & technique
-   (which rendering approach and library from /engine/AGENT_GUIDE.md fits, and why) · Palette (hex values with roles) ·
-   Typography (Google Fonts faces, if any text) · Characters & recurring motifs (how to draw them simply and on-model) ·
-   Motion language (easing, rhythm, camera) · Transitions · Texture & finish · Do / Don't. Choose a look that code can
-   execute well within ~1.5 s per frame.
+   energetic pieces). Every shot needs a concrete, visual action: something happens on screen (a character acts,
+   something transforms, breaks, grows, is revealed). Say what the camera does. Plan transitions that carry motion across
+   the cut. Keep on-screen text minimal unless the brief needs it.
+3. Write style.md (with the Write tool) as the production bible for a team of animator agents, with these sections:
+   Concept · Rendering (the kit and libraries from ${extra.engineDir}/AGENT_GUIDE.md, following the Look above, and why) ·
+   Palette (hex values with roles, per chapter if the palette evolves) · Typography (Google Fonts faces, if any text) ·
+   Characters & recurring motifs (shapes, proportions, poses, expressions: specific enough to build a rig) ·
+   Depth & light (layers, atmosphere, light sources) · Texture & finish · Motion language (easing, squash and stretch,
+   rhythm, camera) · Transitions · Do / Don't. Frames may take up to ~3 s each to render: never simplify for speed.
 4. Save the timeline with mcp__studio__save_storyboard. If it returns problems, fix them and save again.
-5. Reply with a short summary: the concept in one line, the structure in a few lines, and at most 3 questions or choices
-   you want the user to weigh in on during review.`;
+5. Reply with a short summary: the concept in one line, the structure in a few lines, the look you chose and why, and at
+   most 3 questions or choices you want the user to weigh in on during review.`;
     case 'review': return `${ctx}${comments}${msg}
 
 ## Your task: revise the storyboard with the user
@@ -98,6 +113,9 @@ Read style.md first. For each shot, write drafts/<shotId>.svg: one key frame tha
 most telling moment.
 - <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H"> with the project's width and height; include a <title>.
 - Simple flat shapes in the style's palette, clear silhouettes, simple faces/poses; no fine detail, at most ~150 elements.
+  Boards fix composition and staging only; production will render far richer frames, so spend the effort on framing,
+  staging, depth layers (show foreground / midground / background) and the key pose, not on rendering.
+- Where an image asset (@imgN) appears, draw a labelled rectangle with its aspect ratio and the label "@imgN".
 - Show motion with dashed arrows, and camera moves with a small label in a corner (e.g. "PUSH IN", "PAN →").
 - Keep the bottom ~14% free of key action when captions are on.
 - If a shot changes a lot within itself, you may add drafts/<shotId>_b.svg for its end state.
@@ -111,23 +129,34 @@ mcp__studio__set_shot_status, resolve any comments you addressed, and reply with
       return `${ctx}${comments}${msg}
 
 ## Your task: produce the video (${scope})
-Read ${extra.engineDir}/AGENT_GUIDE.md fully, then style.md and the drafts.
-1. Setup (you, the lead): edit studio.html (libraries, fonts, one <script> per chapter file chapters/<chapterId>.js in
-   time order, before the END CHAPTERS marker) and write lib/shared.js (palette, characters, recurring motifs, helpers
-   every chapter will use, with a short API comment at the top). Create a stub for each chapter that registers
-   VIDEO.chapter(...) with all its shots so the whole timeline renders. Check with mcp__studio__render_sheet.
+Read ${extra.engineDir}/AGENT_GUIDE.md fully (especially "Rendering kits" and "The quality bar"), then style.md, the
+drafts and any image assets. Skim one chapter of ${extra.engineDir}/../examples/pdoom/src/ch/ to calibrate the density expected.
+1. Look development (you, the lead) — before any chapter work:
+   - studio.html: libraries and the kit named in style.md, fonts, one <script> per chapter file chapters/<chapterId>.js
+     in time order before the END CHAPTERS marker.
+   - lib/: the palette, reusable rigs for every character and recurring prop (pose, expression, blink, squash, emote
+     parameters, like ${extra.engineDir}/../examples/pdoom/src/clawd.js), background/environment builders with depth layers, and helpers every
+     chapter will use. Put a short API comment at the top of each file.
+   - Register VIDEO.test('cast', ...) (a model sheet: each character in several poses and expressions) and
+     VIDEO.test('style', ...) (one finished style frame of a typical scene). Render them with
+     mcp__studio__render_sheet({ times, test }) and iterate until they look like frames from a finished film. This is
+     where the look is decided: do not delegate until they do.
+   - A stub for each chapter that registers VIDEO.chapter(...) with all its shots so the whole timeline renders.
 2. Delegate: spawn one chapter-builder subagent per chapter, in parallel (several Agent tool calls in one message).
    Give each: chapter id, start/end, its shots (id, times, action, visual, transition, audio cue), the draft files, the
-   shared helper API and anything special. They edit only their own chapter file.
-3. Integrate: when they finish, render sheets around every chapter boundary and a spread of frames across the video;
-   fix seams, style drift and errors. Make sure every shot is "built" or "blocked" with a reason.
-4. Reply with a short summary: what was built, anything blocked, and what to look at first.`;
+   lib/ API, the look-dev frames to match, and the quality bar. They edit only their own chapter file.
+3. Integrate: render sheets around every chapter boundary and a spread of frames across the video; fix seams, style
+   drift and errors.
+4. Polish pass: review every shot against the quality bar in AGENT_GUIDE.md (something happens, depth, camera, acting,
+   light, texture, rhythm). For shots that fall short, either fix them yourself or send them back to a chapter-builder
+   with specific notes. Make sure every shot ends "built" (or "blocked" with a reason).
+5. Reply with a short summary: what was built, anything blocked, and what to look at first.`;
     }
     case 'retake': return `${ctx}${comments}${msg}
 
 ## Your task: retakes for ${extra.shotIds?.length ? extra.shotIds.join(', ') : 'the shots mentioned in the comments'}
 Read ${extra.engineDir}/AGENT_GUIDE.md if you have not in this session. Fix the flagged shots in their chapter files
-(and lib/shared.js only if the fix really is shared). Set each to "building" while you work, check it with
+(and lib/ only if the fix really is shared), keeping to the quality bar in AGENT_GUIDE.md. Set each to "building" while you work, check it with
 mcp__studio__render_sheet (first/middle/last frame plus any hit), then set it to "built". Resolve the comments you
 addressed with mcp__studio__resolve_comments and reply briefly.`;
   }
@@ -149,12 +178,17 @@ fix anything unclear, and set your shots to "drafted" with mcp__studio__set_shot
       description: 'Implements one storyboard chapter as scene code (chapters/<id>.js) for the frame runtime and verifies it visually.',
       model: models.production,
       tools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'mcp__studio__render_sheet', 'mcp__studio__view_drafts', 'mcp__studio__set_shot_status'],
-      prompt: `You implement one chapter of a video as code. First read ${engineDir}/AGENT_GUIDE.md completely, then style.md,
-lib/shared.js, studio.html and your shots' drafts (drafts/<shotId>.svg). Edit only chapters/<yourChapterId>.js.
-For each shot: set it to "building", implement it as a pure function of t, check it with mcp__studio__render_sheet
-(first/last frame, a few in between, every ~0.1 s around hits, and the transitions in and out of your chapter), iterate
-until it is readable, lively and on-style, then set it to "built" with a one-line note. If you cannot finish a shot,
-set it to "blocked" with the reason. Finish with a short report: what you built, helpers you wrote privately, problems.`,
+      prompt: `You animate one chapter of a video as code. First read ${engineDir}/AGENT_GUIDE.md completely (the rendering
+kits and the quality bar), then style.md, everything in lib/, studio.html and your shots' drafts (drafts/<shotId>.svg).
+Render the lead's look-dev frames (mcp__studio__render_sheet with test: 'style' and 'cast') and match that finish.
+Edit only chapters/<yourChapterId>.js. Rough boards fix composition only: your frames must be far richer.
+For each shot: set it to "building", implement it as a pure function of t with depth layers, a camera move, acting
+(anticipation, overshoot, squash and stretch, secondary motion), light and texture, using the lib/ rigs for characters.
+A shot is typically 60–200 lines with its own private helpers. Check it with mcp__studio__render_sheet (first/last
+frame, a few in between, every ~0.1 s around hits, and the transitions in and out of your chapter) and iterate until it
+passes the quality bar, then set it to "built" with a one-line note. When all shots are built, do a second pass: render
+the whole chapter again and upgrade the weakest shot. If you cannot finish a shot, set it to "blocked" with the reason.
+Finish with a short report: what you built, helpers you wrote privately, problems.`,
     },
   };
 }

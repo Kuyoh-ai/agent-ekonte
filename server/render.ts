@@ -30,10 +30,10 @@ async function slot<T>(fn: () => Promise<T>) {
   try { return await fn(); } finally { active--; queue.shift()?.(); }
 }
 
-export function renderSheet(dir: string, times: number[], opts: { cols?: number; width?: number; out: string }) {
+export function renderSheet(dir: string, times: number[], opts: { cols?: number; width?: number; out: string; test?: string }) {
   return slot(async () => {
     const logs: string[] = []; let result: RenderMsg | null = null;
-    const { done } = runRender(dir, [`--sheet=${times.join(',')}`, `--cols=${opts.cols || 3}`, `--w=${opts.width || 640}`, `--out=${opts.out}`], m => {
+    const { done } = runRender(dir, [`--sheet=${times.join(',')}`, `--cols=${opts.cols || 3}`, `--w=${opts.width || 640}`, `--out=${opts.out}`, ...(opts.test ? [`--test=${opts.test}`] : [])], m => {
       if (m.type === 'log' && m.message && !m.message.includes('ms/frame')) logs.push(m.message);
       if (m.type === 'error') logs.push('ERROR: ' + m.message);
       if (m.type === 'done') result = m;

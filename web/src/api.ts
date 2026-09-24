@@ -4,6 +4,7 @@ import type { Brief, Chapter, Project, Shot, Storyboard, StepId } from '../../se
 import type { ChatEntry, StudioEvent } from '../../server/events.ts';
 
 export type { Brief, Chapter, Project, Shot, Storyboard, StepId, ChatEntry };
+export type Asset = Project['assets'][number];
 export type AgentTask = 'plan' | 'review' | 'drafts' | 'build' | 'retake';
 
 export interface ProjectData {
@@ -11,8 +12,10 @@ export interface ProjectData {
   files: { drafts: Record<string, number>; chapters: string[]; finalVideo: number; frames: number; mix: number };
   running: { id: string; task: AgentTask; startedAt: number } | null;
   exporting: boolean;
+  mock: boolean;
 }
-export interface Health { mock: boolean; projectsDir: string; chrome: string | null; ffmpeg: boolean; ffprobe: boolean; git: boolean; auth: string; node: string }
+export interface Health { mock: boolean; projectsDir: string; chrome: string | null; ffmpeg: boolean; ffprobe: boolean; git: boolean; node: string }
+export interface KeyStatus { saved: string | null; env: string | null; file: string | null }
 export interface ProjectSummary { slug: string; name: string; step: StepId; updatedAt: string; shots: number; hasVideo: boolean }
 export interface Revision { id: string; message: string; at: string; files: number }
 export interface Tempo { bpm: number; offset: number; confidence: number; candidates?: { bpm: number; score: number }[] }
@@ -21,15 +24,44 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const init: RequestInit = { method, headers: {} };
   if (body instanceof FormData) init.body = body;
   else if (body !== undefined) { init.body = JSON.stringify(body); (init.headers as Record<string, string>)['Content-Type'] = 'application/json'; }
-  const r = await fetch(url, init);
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((data as { error?: string }).error || `${r.status} ${r.statusText}`);
-  return data as T;
+  // In dev the GUI (Vite) is usually up before the API server, and `tsx watch` restarts it on every edit. The proxy then
+  // answers 502/503/504 or the connection fails without reaching the server, so waiting and retrying is safe for every
+  // method. Give up after ~30 s with a message that points at the server log.
+  for (let attempt = 0; ; attempt++) {
+    let r: Response | null = null;
+    try { r = await fetch(url, init); } catch { r = null; }
+    if (r && ![502, 503, 504].includes(r.status)) {
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((data as { error?: string }).error || `${r.status} ${r.statusText}`);
+      return data as T;
+    }
+    if (attempt >= 40) throw new Error('サーバーに接続できません。`npm run dev` のターミナルに [server] のエラーが出ていないか確認してください。');
+    serverWaiting(true);
+    await new Promise(res => setTimeout(res, Math.min(250 + attempt * 150, 1000)));
+  }
+}
+
+// Lets the UI show "starting the server…" while requests are being retried.
+type WaitListener = (waiting: boolean) => void;
+const waitListeners = new Set<WaitListener>();
+let waitTimer: ReturnType<typeof setTimeout> | undefined;
+function serverWaiting(on: boolean) {
+  waitListeners.forEach(fn => fn(on));
+  clearTimeout(waitTimer);
+  if (on) waitTimer = setTimeout(() => serverWaiting(false), 1500);
+}
+export function useServerWaiting() {
+  const [w, setW] = useState(false);
+  useEffect(() => { waitListeners.add(setW); return () => { waitListeners.delete(setW); }; }, []);
+  return w;
 }
 
 const P = (slug: string) => `/api/projects/${slug}`;
 export const api = {
   health: () => req<Health>('GET', '/api/health'),
+  authStatus: () => req<KeyStatus>('GET', '/api/auth'),
+  saveKey: (key: string | null) => req<KeyStatus>('PUT', '/api/auth/key', { key }),
+  checkAuth: (slug: string) => req<{ ok: boolean; summary: string; error?: string }>('POST', `/api/projects/${slug}/auth/check`, {}),
   projects: () => req<ProjectSummary[]>('GET', '/api/projects'),
   create: (name: string, format: Partial<Project['format']>) => req<Project>('POST', '/api/projects', { name, format }),
   get: (slug: string) => req<ProjectData>('GET', P(slug)),
@@ -40,6 +72,12 @@ export const api = {
   comment: (slug: string, shotId: string, text: string) => req('POST', `${P(slug)}/shots/${shotId}/comments`, { text }),
   editComment: (slug: string, shotId: string, cid: string, patch: { resolved?: boolean; delete?: boolean }) => req('PATCH', `${P(slug)}/shots/${shotId}/comments/${cid}`, patch),
   setStatus: (slug: string, ids: string[], status: Shot['status'], note?: string) => req('POST', `${P(slug)}/shots/status`, { ids, status, note }),
+  uploadAsset: (slug: string, file: File, dims: { width: number; height: number }) => {
+    const f = new FormData(); f.append('file', file); f.append('width', String(dims.width)); f.append('height', String(dims.height));
+    return req<{ id: string; project: Project }>('POST', `${P(slug)}/assets`, f);
+  },
+  patchAsset: (slug: string, id: string, patch: { name?: string; description?: string }) => req<Project>('PATCH', `${P(slug)}/assets/${id}`, patch),
+  deleteAsset: (slug: string, id: string) => req<Project>('DELETE', `${P(slug)}/assets/${id}`),
   history: (slug: string) => req<Revision[]>('GET', `${P(slug)}/history`),
   saveVersion: (slug: string, message: string) => req<{ id: string | null }>('POST', `${P(slug)}/history/save`, { message }),
   restore: (slug: string, id: string) => req('POST', `${P(slug)}/history/restore`, { id }),
@@ -82,8 +120,27 @@ export function useProject(slug: string) {
 
   useEffect(() => {
     reload(); api.chat(slug).then(setChat).catch(() => {});
-    const es = new EventSource(`/api/projects/${slug}/events`);
-    es.onmessage = ev => {
+    // EventSource gives up for good when the server answers with an error (e.g. a 502 while it is still starting or
+    // restarting), so reconnect ourselves and refresh everything once the stream is back.
+    let es: EventSource, closed = false, retry: ReturnType<typeof setTimeout> | undefined, wasDown = false, lastSeen = Date.now();
+    const connect = () => {
+      lastSeen = Date.now();
+      es = new EventSource(`/api/projects/${slug}/events`);
+      es.addEventListener('ping', () => { lastSeen = Date.now(); });
+      es.onopen = () => { if (wasDown) { wasDown = false; reload(); api.chat(slug).then(setChat).catch(() => {}); } };
+      es.onerror = () => {
+        wasDown = true; // events may have been missed: refresh when the stream reopens
+        if (es.readyState === EventSource.CLOSED && !closed) retry = setTimeout(connect, 1500);
+      };
+      es.onmessage = onMessage;
+    };
+    // The server pings every 5 s. Silence means the stream is dead even if the connection looks open.
+    const watchdog = setInterval(() => {
+      if (closed || Date.now() - lastSeen < 12000) return;
+      es.close(); clearTimeout(retry); wasDown = true; connect();
+    }, 3000);
+    const onMessage = (ev: MessageEvent) => {
+      lastSeen = Date.now();
       const e = JSON.parse(ev.data) as StudioEvent;
       if (e.type === 'project-updated') reload();
       else if (e.type === 'agent') setChat(c => [...c, e.entry]);
@@ -94,8 +151,8 @@ export function useProject(slug: string) {
       });
       else if (e.type === 'tts') setTts(e);
     };
-    es.onerror = () => { /* EventSource reconnects on its own */ };
-    return () => es.close();
+    connect();
+    return () => { closed = true; clearTimeout(retry); clearInterval(watchdog); es.close(); };
   }, [slug, reload]);
 
   return { data, error, chat, render, tts, reload, version, setRender };

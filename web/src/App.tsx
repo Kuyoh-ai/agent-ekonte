@@ -1,6 +1,6 @@
 // App.tsx: home (project list) and the project workspace with the stepper.
 import { useEffect, useMemo, useState } from 'react';
-import { api, type AgentTask, type Health, type ProjectData, type ProjectSummary, type StepId, useProject } from './api.ts';
+import { api, type AgentTask, type Health, type ProjectData, type ProjectSummary, type StepId, useProject, useServerWaiting } from './api.ts';
 import { AgentPanel } from './components/AgentPanel.tsx';
 import { HistoryDrawer } from './components/Extras.tsx';
 import { Icon, ToastProvider, useAction } from './components/ui.tsx';
@@ -30,7 +30,13 @@ function useRoute() {
 
 export default function App() {
   const r = useRoute();
-  return <ToastProvider>{r.slug ? <Workspace key={r.slug} slug={r.slug} stepParam={r.step} /> : <Home />}</ToastProvider>;
+  return <ToastProvider>{r.slug ? <Workspace key={r.slug} slug={r.slug} stepParam={r.step} /> : <Home />}<ServerBanner /></ToastProvider>;
+}
+
+// Shown while API requests are being retried (the server is starting or restarting after an edit).
+function ServerBanner() {
+  const waiting = useServerWaiting();
+  return waiting ? <div className="server-wait" role="status"><span className="working"><i />サーバーの起動を待っています…</span></div> : null;
 }
 
 function Home() {
@@ -77,7 +83,7 @@ function Home() {
                 <span className={health.chrome ? 'ok' : 'ng'}>Chrome {health.chrome ? '' : '（見つかりません: CHROME_PATH を設定）'}</span>
                 <span className={health.ffmpeg ? 'ok' : 'ng'}>ffmpeg</span>
                 <span className={health.git ? 'ok' : 'ng'}>git（履歴）</span>
-                <span className="ok">Claude: {health.mock ? 'モック（STUDIO_MOCK=1）' : health.auth === 'api-key' ? 'API キー' : 'Claude Code のログイン'}</span>
+                {health.mock && <span className="ok">Claude: モック（STUDIO_MOCK=1）</span>}
                 <span>保存先: <span className="mono">{health.projectsDir}</span></span>
               </div>
             </section>

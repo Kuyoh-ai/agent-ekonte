@@ -6,6 +6,7 @@
 //   node engine/render.mjs --project=projects/demo --clip=0:6 [--out=out/clip.mp4]              short clip with audio
 //   node engine/render.mjs --project=projects/demo --frames[=a:b] [--workers=4]                 JPEG frames → out/frames (resumable)
 //   node engine/render.mjs --project=projects/demo --encode [--out=out/final.mp4]               frames + audio → MP4
+//   --test=<name> with --sheet/--stills renders a VIDEO.test() look-dev painter instead of the timeline (t = test time)
 // Common: --chrome=<path> (else CHROME_PATH or auto-detect) · --json (machine-readable "@@{...}" progress lines)
 // Output paths are relative to the project directory.
 import puppeteer from 'puppeteer-core';
@@ -67,10 +68,12 @@ const cleanup = async () => { await browser.close().catch(() => {}); await serve
 async function openPage(tag = '') {
   const page = await browser.newPage();
   await page.setViewport({ width: Math.min(W, 1920), height: Math.min(H, 1920) });
-  page.on('console', m => { if (['error', 'warn'].includes(m.type()) && !m.text().startsWith('Failed to load resource')) log(`[page${tag}] ${m.text()}`); });
+  const seen = new Set(); // WebGL drivers repeat the same warning every frame: report each message once per page
+  page.on('console', m => { const txt = m.text(); if (['error', 'warn'].includes(m.type()) && !txt.startsWith('Failed to load resource') && !seen.has(txt)) { seen.add(txt); log(`[page${tag}] ${txt}`); } });
   page.on('response', r => { if (r.status() >= 400 && !r.url().endsWith('/favicon.ico')) log(`[page${tag}] ${r.status()} ${r.url().replace(server.url, '')}`); });
   page.on('pageerror', e => log(`[page error${tag}] ${e.message}`));
-  await page.goto(`${server.url}/studio.html?render`, { waitUntil: 'networkidle0', timeout: 120000 });
+  const test = args.test && args.test !== true ? `&test=${encodeURIComponent(String(args.test))}` : '';
+  await page.goto(`${server.url}/studio.html?render${test}`, { waitUntil: 'networkidle0', timeout: 120000 });
   await page.waitForFunction('window.ready === true', { timeout: 120000 });
   return page;
 }

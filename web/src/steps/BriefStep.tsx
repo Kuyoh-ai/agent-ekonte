@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, fileUrl, fmtTime, type Brief, type ProjectData, type Tempo } from '../api.ts';
 import { Icon, useAction, useToast } from '../components/ui.tsx';
+import { ConnectionCard, LookCard } from './BriefCards.tsx';
+import { AssetsCard } from '../components/Assets.tsx';
 
 const BRIEF_FIELDS: { key: keyof Brief; label: string; hint: string; rows: number; placeholder: string }[] = [
   { key: 'theme', label: 'テーマ・伝えたいこと', hint: '何についての動画で、見た人に何を残したいか', rows: 3, placeholder: '例: 小さなロボットが初めて朝日を見る。新しいことを始める勇気' },
@@ -28,7 +30,9 @@ export function BriefStep({ slug, data, onNext }: { slug: string; data: ProjectD
   useEffect(() => { if (saved) setBrief(data.brief); }, [data.brief]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveBrief = () => act(async () => { await api.saveBrief(slug, brief); setSaved(true); });
   const setField = (k: keyof Brief, v: string) => { setBrief(b => ({ ...b, [k]: v })); setSaved(false); };
-  const ready = !!(brief.theme.trim() || brief.purpose.trim());
+  const hasBrief = !!(brief.theme.trim() || brief.purpose.trim());
+  const connected = data.mock || p.auth !== 'unset';
+  const ready = hasBrief && connected;
 
   return (
     <div className="page">
@@ -41,6 +45,8 @@ export function BriefStep({ slug, data, onNext }: { slug: string; data: ProjectD
         <span className="spacer" />
         <button className="btn primary lg" disabled={!ready || busy} onClick={async () => { if (!saved) await api.saveBrief(slug, brief); onNext(); }}>構成案へ進む<Icon name="next" /></button>
       </div>
+
+      <ConnectionCard slug={slug} data={data} />
 
       <section className="card stack">
         <div className="section-title"><h2>内容</h2><span className="small muted">{saved ? '保存済み' : '未保存の変更があります（入力欄から離れると保存）'}</span></div>
@@ -57,10 +63,13 @@ export function BriefStep({ slug, data, onNext }: { slug: string; data: ProjectD
         </div>
       </section>
 
+      <AssetsCard slug={slug} data={data} />
+      <LookCard slug={slug} data={data} />
       <FormatCard slug={slug} data={data} />
       <MusicCard slug={slug} data={data} />
       <NarrationCard slug={slug} data={data} />
-      {!ready && <p className="notice info">「テーマ・伝えたいこと」か「目的・使い道」を書くと次へ進めます。</p>}
+      {!hasBrief && <p className="notice info">「テーマ・伝えたいこと」か「目的・使い道」を書くと次へ進めます。</p>}
+      {!connected && <p className="notice info">「Claude の接続」で接続方法を選ぶと次へ進めます。</p>}
       {p.audio.music?.file && p.audio.narration.enabled && <p className="notice info">音楽とナレーションの両方を使います。ナレーションの間は音楽の音量を {Math.round(p.audio.narration.musicVolume * 100)}% に下げて重ねます。</p>}
     </div>
   );

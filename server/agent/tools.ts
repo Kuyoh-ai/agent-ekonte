@@ -139,13 +139,14 @@ export function studioServer(slug: string, task: string) {
         return { content: [{ type: 'image' as const, data: jpg, mimeType: 'image/jpeg' }, { type: 'text' as const, text: `${items.length} draft(s)${shots.length > 24 ? ' (first 24 shown)' : ''}.` }] };
       }),
 
-      tool('render_sheet', 'Render frames of the real video at the given times with headless Chrome and return them as one contact sheet image, with ms per frame and any page errors. Use it to check your scene code visually.', {
-        times: z.array(z.number()).min(1).max(12).describe('Times in seconds'),
+      tool('render_sheet', 'Render frames of the real video at the given times with headless Chrome and return them as one contact sheet image, with ms per frame and any page errors. Use it to check your scene code visually. With `test`, render a VIDEO.test() look-dev painter (model sheet, style frame) instead of the timeline.', {
+        times: z.array(z.number()).min(1).max(12).describe('Times in seconds (project time, or the test\'s own time when `test` is set)'),
         cols: z.number().int().min(1).max(4).optional(),
         width: z.number().int().min(240).max(960).optional().describe('Width of each cell in px (default 640)'),
-      }, async ({ times, cols, width }) => {
+        test: z.string().optional().describe('Name of a VIDEO.test(name, fn) painter to render instead of the timeline'),
+      }, async ({ times, cols, width, test }) => {
         const out = `out/check/${task}-${Date.now().toString(36)}-${++sheetN}.jpg`;
-        const r = await renderSheet(dir, times, { cols: cols || Math.min(3, times.length), width, out });
+        const r = await renderSheet(dir, times, { cols: cols || Math.min(3, times.length), width, out, test });
         const notes = [r.ms.length ? `ms/frame: ${r.ms.join(' ')}` : '', ...r.logs.slice(0, 20)].filter(Boolean).join('\n');
         if (!r.ok) return text(`Render failed.\n${notes}\n${r.errTail}`.trim(), true);
         const jpg = await readFile(join(dir, r.out));

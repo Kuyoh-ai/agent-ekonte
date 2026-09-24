@@ -1,0 +1,7 @@
+{
+  "name": "Motion Kit Demo",
+  "slug": "motion-demo",
+  "format": { "width": 1280, "height": 720, "fps": 24, "duration": 4 },
+  "audio": {},
+  "captions": "none"
+}

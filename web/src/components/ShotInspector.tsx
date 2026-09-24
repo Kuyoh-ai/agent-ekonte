@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { api, fmtTime, type ProjectData, type Shot, type Storyboard } from '../api.ts';
 import { findShot, patchShot, removeShot, setDuration, splitShot } from '../storyboard.ts';
 import { Icon, StatusChip, useAction } from './ui.tsx';
+import { AssetChips, MentionText } from './Assets.tsx';
 
 interface Props {
   slug: string; data: ProjectData; shotId: string | null;
@@ -88,10 +89,11 @@ export function ShotInspector({ slug, data, shotId, save, locked, fields = 'full
                   {!c.resolved && <button className="btn ghost sm danger" aria-label="コメントを削除" onClick={() => act(() => api.editComment(slug, shot.id, c.id, { delete: true }))}><Icon name="trash" /></button>}
                 </>}
               </header>
-              <p style={{ whiteSpace: 'pre-wrap' }}>{c.text}</p>
+              <p style={{ whiteSpace: 'pre-wrap' }}><MentionText text={c.text} slug={slug} assets={data.project.assets} /></p>
             </div>
           ))}
         </div>
+        <AssetChips slug={slug} assets={data.project.assets} targetId={`comment-${shot.id}`} value={comment} onChange={setComment} />
         <textarea className="input" id={`comment-${shot.id}`} rows={2} placeholder="例: もっと寄りで、驚いた表情を大きく" value={comment} onChange={e => setComment(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && comment.trim()) { e.preventDefault(); act(async () => { await api.comment(slug, shot.id, comment); setComment(''); }); } }} />
         <div className="row"><span className="spacer" />

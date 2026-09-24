@@ -47,7 +47,7 @@
   const V = {
     W: 1920, H: 1080, fps: 24, duration: 10, bpm: 0, beatOffset: 0, boil: 12,
     project: null, captions: [], chapters: [], overlays: [], source: null, T: 0,
-    canvas: null, ctx: null, ready: false, lastError: null, _waits: [], _setups: [], _boot: null,
+    canvas: null, ctx: null, ready: false, lastError: null, _waits: [], _setups: [], _boot: null, assets: [], images: {},
   };
 
   // ---------- beat helpers (active when project.json has audio.music.bpm) ----------
@@ -67,6 +67,11 @@
     V.chapters.sort((a, b) => a.start - b.start);
   };
   V.overlay = fn => { V.overlays.push(fn); };
+  // Look-dev tests: VIDEO.test('cast', fn) registers a frame painter outside the timeline (model sheets, style frames,
+  // texture tests). Open studio.html?test=cast or render with --test=cast; t is then just the test's own time.
+  V.tests = {};
+  V.test = (name, fn) => { V.tests[name] = fn; };
+  V.activeTest = new URLSearchParams(location.search).get('test');
   V.useSource = (canvas, opts = {}) => { V.source = { canvas, ...opts }; };
   V.whenReady = p => { V._waits.push(Promise.resolve(p)); };
   // setup(fn): runs once after project.json is loaded (VIDEO.W/H/ctx are valid) and before the first frame. May be async.
@@ -80,6 +85,8 @@
     return { chapter: ch.id, index: i, shotId: ch.shots[i][2] || `${ch.id}#${i + 1}`, fn: ch.shots[i][1], t0, end };
   };
 
+  // VIDEO.image('img1') → decoded HTMLImageElement of an uploaded asset.
+  V.image = id => { const img = V.images[String(id).replace(/^@/, '')]; if (!img) throw new Error(`unknown image asset "${id}" (have: ${Object.keys(V.images).join(', ') || 'none'})`); return img; };
   V.captionAt = t => V.captions.find(c => t >= c.start && t < c.end) || null;
 
   // ---------- default drawing ----------
@@ -109,12 +116,16 @@
   async function paintFrame(t) {
     V.T = t; frameRand = rng(1000 + Math.floor(t * V.boil));
     const c = V.ctx; c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, V.W, V.H); c.restore();
-    const loc = V.locate(t);
-    const info = loc ? { chapter: loc.chapter, shotId: loc.shotId, t0: loc.t0, end: loc.end, p: clamp((t - loc.t0) / (loc.end - loc.t0)) } : null;
-    if (loc) await loc.fn(t, t - loc.t0, loc.end - loc.t0, info); else placeholder(t);
+    const test = V.activeTest ? V.tests[V.activeTest] : null;
+    if (V.activeTest && !test) throw new Error(`no VIDEO.test named "${V.activeTest}" (registered: ${Object.keys(V.tests).join(', ') || 'none'})`);
+    const loc = test ? null : V.locate(t);
+    const info = test ? { chapter: 'test', shotId: `test:${V.activeTest}`, t0: 0, end: Infinity, p: 0 }
+      : loc ? { chapter: loc.chapter, shotId: loc.shotId, t0: loc.t0, end: loc.end, p: clamp((t - loc.t0) / (loc.end - loc.t0)) } : null;
+    if (test) await test(t, t, Infinity, info);
+    else if (loc) await loc.fn(t, t - loc.t0, loc.end - loc.t0, info); else placeholder(t);
     if (V.source) { if (V.source.beforeCopy) await V.source.beforeCopy(t); c.drawImage(V.source.canvas, 0, 0, V.W, V.H); }
     for (const fn of V.overlays) await fn(t, info);
-    drawCaption(t);
+    if (!test) drawCaption(t);
     return info;
   }
   window.renderAt = async (t, type = 'image/png', q = .92) => {
@@ -147,6 +158,13 @@
       V.bpm = p.audio?.music?.bpm || 0; V.beatOffset = p.audio?.music?.offset || 0;
     }
     V.captions = await loadJSON('captions.json', []);
+    // Image assets (@img1 ...): decoded before the first frame so shots can draw them synchronously.
+    V.assets = p?.assets || [];
+    await Promise.all(V.assets.map(async a => {
+      const img = new Image(); img.src = a.file;
+      try { await img.decode(); V.images[a.id] = img; } catch { reportError(new Error(`image asset @${a.id} (${a.file}) could not be loaded`)); }
+    }));
+    if (document.readyState === 'loading') await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
     let cv = document.getElementById('out');
     if (!cv) { cv = document.createElement('canvas'); cv.id = 'out'; document.body.prepend(cv); }
     cv.width = V.W; cv.height = V.H; V.canvas = cv; V.ctx = cv.getContext('2d', { willReadFrequently: false });

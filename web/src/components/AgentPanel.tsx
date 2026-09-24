@@ -1,7 +1,8 @@
 // AgentPanel.tsx: the conversation with Claude. Shows every run's messages and tool activity, sends the next request.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmtUsd, type AgentTask, type ChatEntry, type ProjectData } from '../api.ts';
+import { api, fmtUsd, type AgentTask, type Asset, type ChatEntry, type ProjectData } from '../api.ts';
 import { Icon, useAction } from './ui.tsx';
+import { AssetChips, MentionText } from './Assets.tsx';
 
 export const TASK_LABEL: Record<string, string> = { plan: '構成案', review: 'レビュー', drafts: 'ラフ絵コンテ', build: '本制作', retake: 'リテイク' };
 
@@ -50,7 +51,7 @@ export function AgentPanel({ slug, data, chat, task, placeholder, hint, shotIds,
         {shown.map(e => {
           const sep = e.task !== lastTask ? <div className="task-sep" key={e.id + 's'}>{TASK_LABEL[e.task] || e.task}</div> : null;
           lastTask = e.task;
-          return [sep, <Entry key={e.id} e={e} />];
+          return [sep, <Entry key={e.id} e={e} slug={slug} assets={data.project.assets} />];
         })}
       </div>
       <div className="agent-input">
@@ -61,6 +62,7 @@ export function AgentPanel({ slug, data, chat, task, placeholder, hint, shotIds,
             <button className="btn sm danger" onClick={() => act(() => api.stopAgent(slug), '停止を依頼しました')}><Icon name="stop" />停止</button>
           </div>
         ) : hint ? <p className="small muted">{hint}</p> : null}
+        <AssetChips slug={slug} assets={data.project.assets} targetId={`agent-input-${task}`} value={text} onChange={setText} />
         <textarea className="input" id={`agent-input-${task}`} value={text} placeholder={placeholder} disabled={!!running || !canSend}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !running && (text.trim() || hint)) { e.preventDefault(); send(); } }} />
@@ -74,8 +76,8 @@ export function AgentPanel({ slug, data, chat, task, placeholder, hint, shotIds,
   );
 }
 
-function Entry({ e }: { e: ChatEntry }) {
+function Entry({ e, slug, assets }: { e: ChatEntry; slug: string; assets: Asset[] }) {
   if (e.role === 'tool') return <div className="msg tool">{e.sub && <span className="sub">[{e.sub}] </span>}{e.text}</div>;
   if (e.role === 'result') return <div className="msg result">✓ {e.text}{e.costUsd ? ` · ${fmtUsd(e.costUsd)}` : ''}</div>;
-  return <div className={`msg ${e.role}`}>{e.text}</div>;
+  return <div className={`msg ${e.role}`}><MentionText text={e.text} slug={slug} assets={assets} /></div>;
 }
