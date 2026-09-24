@@ -134,3 +134,66 @@ add a sweep test for it, and only merge it into the kit once the sweep looks goo
 Deeper background: `engine/docs/research-chibi-construction.md` (proportions, eyes, hair, line, cel shading, mouth
 shapes, rig parameters, manga symbols) and `engine/docs/research-vector-techniques.md` (curves, tapered strokes,
 morphing, canvas finishing, secondary motion, SVG as data).
+
+## 8. Construction rules (the formulas the rig implements)
+
+Each rule names the rubric item it serves (1 silhouette, 2 hair tufts, 3 eyes, 4 face layout, 5 features, 6 body /
+cloth, 7 line, 8 light). Sources and reasoning: `engine/docs/research-chibi-head.md`, `research-chibi-body.md`.
+H = head width (1.0 in head units), T = torso height.
+
+**R1 hair outline is one continuous arc (1, 2).** `hairOuter(θ) = skull(θ) × (1 + k(θ))`, k = .15 at the crown, .08 at
+the temples, → 0 at the side-lock tips. No flat top, no vertical sides. The crown leans 3–5 % toward the parting.
+Tuft notches only on the lower edge (bangs, side locks); the crown → temple → side lock is at most two Béziers per side.
+
+**R2 bangs = big / small rhythm from a parting (2, 4).** 3–5 major tufts. Widths alternate big : small = 1 : .55 (±15 %
+jitter), notch depths 1 : .4. Tilt `= sign(x − partX) × (8° + 12° × |x − partX| / halfWidth)`. Tufts nearer the parting
+are drawn on top. Big tufts get a split, rounded tip; small tufts a point. Tips touch the top of the eyes (eyeTop + .1
+eyeH); the brow line is always covered. One side has one tuft more than the other (asymmetry).
+
+**R3 side locks bulge then fall (1, 2).** From the outer bang, out to skull_rx × 1.12 at eye height, down to the chin
+(± 10 %), tip curling in (young) or flicking out (lively). One point + one inner notch per lock. Back hair = skull × 1.15
+lower half behind the locks, scalloped hem. Hair mass, locks and back hair share one outline (one group).
+
+**R4 tails leave upward then fall (2, 5).** Knot at (± .45 rx, cy − .35 ry). Centre line: knot → +(.15, −.25) → +(.35,
++.4) → tip +(.3, +1.0) (S curve). Width `wmax × sin(π t^.7)`, tip split in 2–3. Two convergence lines on the head.
+
+**R5 cat ears grow from the hair (5).** Base centre on the hair ellipse at ±40° from the top; axis = surface normal
+rotated 25° outward. Height .35–.5 H, base width .75 × height, base sunk 20 % into the hair. Outer edge bows out by
+.25 × height, inner edge nearly straight, tip radius .04 × height. Inner ear = .65 scale shifted to the base, fur as
+overlapping small arcs. Two or three small hair tufts cover the base. No human ears. With a cap: same base, a dark
+hole ellipse under the ear, crown bumped outward at the base.
+
+**R6 cap = hemisphere + lens brim + shadow (5, 8).** Crown = skull × 1.18 upper half, clipped by `brimline(x) = brimY +
+sag (x/rx)²`, brimY = eyeTop − 1.1 eyeH, tilted back (「へ」). Brim: top edge = brimline, bottom edge sags to brimY + .11
+H (lens), plus a .03 H thickness band underneath, plus a shadow band on the face (alpha .2). Bangs start behind the brim.
+
+**R7 angel ring + three shadows (8).** Ring centre at skullTop + .3 (hairline − skullTop), on a concentric ellipse
+scaled .75, x within ± .7 rx, zig-zag synced to tuft count, ends fade before the outline, alpha .5. Shadows: bangs
+shifted (0, +.04 H) clipped to the face (alpha .2); side locks shifted onto the back hair; lower 30 % of the hair
+darker. One light, top-left.
+
+**R8 torso is a bean (6).** Top width .6 H, max width .8 H at 60 % of T, half-circle bottom; sloped shoulders (20–30°)
+from the neck root; sides always convex. Hem = arc following the bean (sag .06 H) + rib band .08 T with 3–5 thin lines.
+
+**R9 arms are one tapered tube (6).** Width .18 H → .14 H (× 1.3 for sleeves). Hanging: W = (± .36 H, 1.0 T). Fists up:
+S = (± .3 H, .05 T), E = (± .55 H, −.15 T), W = (± .45 H, −.55 T): fists beside the head at temple height, never above
+the crown, never over the face. Left and right differ by ±10°. Elbow = bend of the centre line only; a teardrop line
+inside the elbow when the bend > 60°.
+
+**R10 hands and 萌え袖 (6).** Fist = rounded rect .24 × .22 H, r .09 H, rotated 10–20°, thumb bump. Cuff = 1.3–1.5 ×
+arm width, edge is an S curve (never a straight line), one slack line above it, the hand shows 0–50 % of its size.
+
+**R11 cloth (6).** At most 4 fold lines: armpit, inner elbow, slack above hem and cuff. Hoodie = bean × 1.1 + rib hem +
+pocket trapezoid + hood as a neck ring with one back bulge + strings with aglets. Turtleneck = roll band under the
+chin (.55 × .12 H) touching the chin, one fold arc; the chin sinks into it. Pleated skirt = trapezoid .7 → 1.1 H, top
+edge convex, 5–7 scallops, one thin valley line each, spacing ∝ cos.
+
+**R12 legs and the jump (6).** Leg = tapered tube .22 → .16 H, no knee line. Standing: A = (± .14 H, T + .5 H). Jump:
+front knee K = P + (.15 H fwd, −.05 H), A = K + (.02, .22); back leg K = P + (−.1, .18), A = K + (−.08, .2); toes down,
+shoes rotated 20–40°. Shoe = capsule .3 × .14 H pushed 60 % forward, sole line .03 H. Thigh-high top = thick convex arc
+with a .02 H bulge above it.
+
+**R13 three line weights (7).** Outer silhouette .020 H, part boundaries .014 H, inner lines .008 H, inner lines
+tapered both ends, no line where a front part overlaps a back part.
+
+Acceptance for a rule = its rubric item scores ≥ 4 from the external judge on both reference characters.

@@ -5,33 +5,33 @@
 //    turtleneck, dark pleated skirt, black thigh-highs, white shoes.
 const AOI = {
   name: 'aoi', skin: '#fde5d3',
-  head: { cheek: .6, chin: .2, jaw: .72 },
+  head: { cheek: .6, chin: .15, jaw: .74 },
   eyes: { y: .64, spacing: .23, size: .27, aspect: 1, iris: '#3ec7c0', lash: .7 },
-  mouth: { y: .84, width: .11 },
-  hair: { color: '#6fd3e6', dark: '#2f6bb4', light: '#bff0f7', volume: .12,
-    bangs: { n: 6, part: -.35, hairline: .3, length: .17, curl: .3, seed: 4 },
-    side: { n: 2, length: .9, width: .24, curl: .2 },
-    back: { style: 'ponytail', length: .6, side: 1 }, ahoge: { kind: 'loop' },
-    streaks: [{ spine: [[-.18, -.2], [-.2, .0], [-.13, .12]], w: .035 }, { spine: [[.2, -.22], [.22, .0], [.27, .1]], w: .03 }] },
-  ears: { size: .5, at: .78, tilt: .3, width: .3, inner: '#f3f0ee' },
+  mouth: { y: .85, width: .12 },
+  hair: { color: '#6fd3e6', dark: '#2f6bb4', light: '#bff0f7', crown: .15, temple: .08,
+    bangs: { n: 5, part: -.3, depth: .08, seed: 4, extraSide: 1 },
+    side: { length: 1.0, width: .28, curl: -.12 },
+    back: { style: 'ponytail', side: 1, length: 1.0 }, ahoge: { kind: 'loop', x: -.05 },
+    streaks: [{ spine: [[-.2, -.15], [-.22, .0], [-.16, .1]], w: .035 }, { spine: [[.16, -.18], [.19, -.02], [.24, .08]], w: .03 }] },
+  ears: { height: .45, at: 40, tilt: 25, inner: '#f3f0ee' },
   tail: { color: '#6fd3e6', inner: '#d8f4f8', side: 1 },
-  body: { heads: 1.85, torsoWidth: .62, top: { kind: 'jacket', color: '#2b2f4a', light: '#5a5f86', inner: '#8a8f9c', badge: true }, bottom: { kind: 'skirt', color: '#2e3b52', socks: '#1f2029', shoes: '#e9e9ef' } },
+  body: { heads: 1.9, top: { kind: 'jacket', color: '#2b2f4a', light: '#5a5f86', inner: '#8a8f9c', badge: true }, bottom: { kind: 'skirt', color: '#2e3b52', socks: '#1f2029', shoes: '#e9e9ef' } },
 };
 // 2: cat-eared girl, long teal hair, black cap with red brim, white hair clip, black hoodie, ripped jeans, sneakers.
 const MIKU = {
   name: 'miku', skin: '#fde5d3',
-  head: { cheek: .6, chin: .2, jaw: .72 },
+  head: { cheek: .6, chin: .15, jaw: .74 },
   eyes: { y: .66, spacing: .23, size: .27, aspect: 1.05, iris: '#3fd0b8', lash: .8 },
-  mouth: { y: .84, width: .11 },
-  hair: { color: '#4fc9c4', dark: '#237f86', light: '#b8f0ea', volume: .1, highlight: false,
-    bangs: { n: 5, part: .25, hairline: .32, length: .16, curl: .2, seed: 7 },
-    side: { n: 2, length: 1.3, width: .26, curl: .15 },
-    back: { style: 'long', length: .6, volume: .12 } },
-  ears: { size: .5, at: .78, tilt: .35, width: .3, inner: '#f3f0ee' },
+  mouth: { y: .85, width: .12 },
+  hair: { color: '#4fc9c4', dark: '#237f86', light: '#b8f0ea', crown: .12, temple: .08, highlight: false,
+    bangs: { n: 5, part: .25, depth: .07, seed: 7, extraSide: 1 },
+    side: { length: 1.6, width: .3, curl: .05 },
+    back: { style: 'long', length: .8 } },
+  ears: { height: .45, at: 40, tilt: 28, inner: '#f3f0ee' },
   tail: { color: '#4fc9c4', side: 1 },
-  hat: { kind: 'cap', color: '#25252c', brim: '#c2323c', y: .2 },
+  hat: { kind: 'cap', color: '#25252c', brim: '#c2323c' },
   hairclip: { side: -1, color: '#e9e9ef' },
-  body: { heads: 2.0, torsoWidth: .62, top: { kind: 'hoodie', color: '#1d1d24', light: '#3a3a46', string: '#e8e8ee', zip: '#c9cbd6' }, bottom: { kind: 'jeans', color: '#8fb4d4', ripped: true, shoes: '#1a1a20', sole: '#f1f1f4' } },
+  body: { heads: 2.0, top: { kind: 'hoodie', color: '#1d1d24', light: '#3a3a46', string: '#e8e8ee', zip: '#c9cbd6' }, bottom: { kind: 'jeans', color: '#8fb4d4', ripped: true, shoes: '#1a1a20', sole: '#f1f1f4' } },
 };
 
 const white = () => { const c = VIDEO.ctx; c.fillStyle = '#fff'; c.fillRect(0, 0, VIDEO.W, VIDEO.H); return c; };
@@ -105,5 +105,14 @@ VIDEO.test('cast2', () => {
   chibi(c, MIKU, { x: W * .72, y: H * .38, s: W * .22, eyes: 'round', mouth: 'smile', blush: .3, look: [-.4, .1], emote: { kind: 'q', x: .7, y: -.8, s: .18 } });
 });
 // judge sheets: one character, the pose of the reference image, large (used by the external judge loop)
-VIDEO.test('judge1', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, AOI, { x: W * .5, y: H * .4, s: W * .36, eyes: 'xx', mouth: 'yell', brow: { angle: .3 }, blush: 1, squash: -.02, emote: { kind: 'shout', x: -.78, y: -.1, s: .2, color: '#f0a030' } }); });
-VIDEO.test('judge2', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, MIKU, { x: W * .5, y: H * .4, s: W * .34, eyes: ['round', 'happy'], mouth: 'grin', fang: 1, blush: .6, armL: 2.4, armR: 2.2, fists: true, jump: 1, tilt: -.12, hairSway: .4, tailWag: .6, emote: { kind: 'lines', x: -.9, y: -.7, s: .2 } }); });
+VIDEO.test('judge1', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, AOI, { x: W * .5, y: H * .4, s: W * .34, eyes: 'xx', mouth: 'yell', blush: 1, squash: -.02, emote: { kind: 'shout', x: -.8, y: -.1, s: .2, color: '#f0a030' } }); });
+VIDEO.test('judge2', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, MIKU, { x: W * .5, y: H * .38, s: W * .32, eyes: ['round', 'happy'], mouth: 'grin', fang: 1, blush: .6, armL: 1, armR: 1, jump: 1, frontLeg: -1, tilt: -.1, hairSway: .5, tailWag: .6, emote: { kind: 'lines', x: -.95, y: -.6, s: .2 } }); });
+// pose sweep: arm raise (columns) × jump (rows) — self-check that limbs never cross the face
+VIDEO.test('sweep-pose', () => {
+  const c = white(), W = VIDEO.W, sz = W * .12;
+  [0, 1].forEach((jump, r) => [0, .35, .7, 1].forEach((a, k) => {
+    const x = W * (.14 + k * .24), y = W * (.22 + r * .5);
+    chibi(c, MIKU, { x, y, s: sz, armL: a, armR: a, jump, eyes: 'round', mouth: 'smile', blush: .4 });
+    label(c, `arm ${a} jump ${jump}`, x, y + 1.35 * sz);
+  }));
+});
