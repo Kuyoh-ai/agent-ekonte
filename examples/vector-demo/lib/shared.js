@@ -104,3 +104,6 @@ VIDEO.test('cast2', () => {
   chibi(c, MIKU, { x: W * .28, y: H * .38, s: W * .22, eyes: ['round', 'happy'], mouth: 'grin', fang: 1, blush: .6, armL: 2.4, armR: 2.2, fists: true, jump: 1, tilt: -.12, hairSway: .4, tailWag: .6, emote: { kind: 'lines', x: -.9, y: -.7, s: .2 } });
   chibi(c, MIKU, { x: W * .72, y: H * .38, s: W * .22, eyes: 'round', mouth: 'smile', blush: .3, look: [-.4, .1], emote: { kind: 'q', x: .7, y: -.8, s: .18 } });
 });
+// judge sheets: one character, the pose of the reference image, large (used by the external judge loop)
+VIDEO.test('judge1', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, AOI, { x: W * .5, y: H * .38, s: W * .44, eyes: 'xx', mouth: 'shout', brow: { angle: .3 }, blush: 1, squash: -.02, emote: { kind: 'shout', x: -.78, y: -.1, s: .2, color: '#f0a030' } }); });
+VIDEO.test('judge2', () => { const c = white(), W = VIDEO.W, H = VIDEO.H; chibi(c, MIKU, { x: W * .5, y: H * .42, s: W * .42, eyes: ['round', 'happy'], mouth: 'grin', fang: 1, blush: .6, armL: 2.4, armR: 2.2, fists: true, jump: 1, tilt: -.12, hairSway: .4, tailWag: .6, emote: { kind: 'lines', x: -.9, y: -.7, s: .2 } }); });
